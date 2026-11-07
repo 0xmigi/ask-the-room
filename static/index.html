@@ -102,26 +102,7 @@
       <h1>Ask the Room</h1>
       <div class="status"><span class="dot" id="dot"></span><span id="status">connecting…</span></div>
     </div>
-    <button type="button" id="agentBtn" class="agent-btn" aria-expanded="false">Connect your agent</button>
-  </div>
-  <div id="agent" class="agent" hidden>
-    <p><b>Use your own AI.</b> The room remembers every talk, slide and speaker; your agent does the
-       thinking. One click, same Wi-Fi as this laptop.</p>
-    <div class="btns">
-      <a class="big" id="lnCursor" href="#">Add to Cursor</a>
-      <a class="big" id="lnVscode" href="#">Add to VS Code</a>
-      <button type="button" class="big" data-copy="cmdClaude">Copy for Claude Code</button>
-      <button type="button" class="big" data-copy="mcpUrl">Copy MCP link (any agent)</button>
-    </div>
-    <label>No MCP? (ChatGPT, Grok, Muse, …)</label>
-    <div class="btns"><a class="big alt" id="lnContext" href="#" download="ask-the-room-context.md">Download room context (.md)</a></div>
-    <p class="small">Drop the file into any chat. It has the speaker timeline and every timestamped line.</p>
-    <details class="small"><summary>Details</summary>
-      <label>Claude Code</label><code id="cmdClaude">…</code>
-      <label>MCP link</label><code id="mcpUrl">…</code>
-      <p>Tools: <b>search</b>, <b>transcript</b>, <b>recent</b>, <b>speakers_timeline</b>, <b>frame</b> (the video
-         frame as an image), <b>moment</b> (frame + clip links). The key in the link keeps it to the room.</p>
-    </details>
+    <button type="button" id="agentBtn" class="agent-btn" title="Copies the room's MCP link: paste it into your agent">Connect with MCP</button>
   </div>
 </header>
 
@@ -173,39 +154,22 @@ async function status() {
 }
 status(); setInterval(status, 15000);
 
-// ---- "Connect your agent": MCP URL + room key, ready to paste ----
+// ---- "Connect with MCP": one click copies the room's MCP link (room key included) ----
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch {}
+  const ta = document.createElement("textarea");  // plain-http LAN pages: the old way still works
+  ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+  document.body.appendChild(ta); ta.select();
+  let ok = false; try { ok = document.execCommand("copy"); } catch {}
+  ta.remove(); return ok;
+}
 $("agentBtn").addEventListener("click", async () => {
-  const panel = $("agent"), btn = $("agentBtn");
-  const open = panel.hidden;
-  panel.hidden = !open;
-  btn.setAttribute("aria-expanded", String(open));
-  if (open && $("mcpUrl").textContent === "…") {
-    try {
-      const c = await (await fetch("api/connect")).json();
-      $("cmdClaude").textContent = c.claude_code;
-      $("mcpUrl").textContent = c.url;
-      $("lnCursor").href = c.cursor;
-      $("lnVscode").href = c.vscode;
-      $("lnContext").href = c.context;
-    } catch { $("cmdClaude").textContent = "Couldn't load connection details"; }
-  }
-});
-document.addEventListener("click", async (e) => {
-  const b = e.target.closest("[data-copy]");
-  if (!b) return;
-  b.dataset.label = b.dataset.label || b.textContent;
-  const text = $(b.dataset.copy).textContent;
-  let ok = false;
-  try { await navigator.clipboard.writeText(text); ok = true; } catch {}
-  if (!ok) {  // plain-http LAN pages can't use the async clipboard; the old way still works
-    const ta = document.createElement("textarea");
-    ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
-    document.body.appendChild(ta); ta.select();
-    try { ok = document.execCommand("copy"); } catch {}
-    ta.remove();
-  }
-  b.textContent = ok ? "Copied ✓" : "Copy failed: see Details";
-  setTimeout(() => (b.textContent = b.dataset.label), 1600);
+  const btn = $("agentBtn");
+  try {
+    const c = await (await fetch("api/connect")).json();
+    btn.textContent = (await copyText(c.url)) ? "MCP link copied ✓" : c.url;
+  } catch { btn.textContent = "Couldn't get the link"; }
+  setTimeout(() => (btn.textContent = "Connect with MCP"), 2500);
 });
 
 async function ask(text) {

@@ -39,14 +39,9 @@ X livestream ──yt-dlp──► HLS ──ffmpeg (one process)
 
 ## Use your own AI
 
-The room remembers; **people's own AI does the thinking** (and pays for it). Open the chat page and
-tap **Connect your agent**:
-
-- **Add to Cursor** / **Add to VS Code**: one-click install links
-- **Copy for Claude Code**: `claude mcp add --transport http ask-the-room "http://<laptop-ip>:8000/mcp?key=<ROOM_KEY>"`
-- **Copy MCP link**: paste into any MCP client
-- **Download room context (.md)**: for AIs that can't connect (ChatGPT, Grok, Muse…). One file with
-  the speaker timeline and every timestamped line, ready to drop into any chat
+The room remembers; **people's own AI does the thinking** (and pays for it). On the chat page, tap
+**Connect with MCP**: it copies the room's MCP link (key included). Paste it into any MCP client
+(Claude Code, Cursor, VS Code, ...). That's it.
 
 | MCP tool | What it returns (no LLM on our side; costs the room nothing per question) |
 |---|---|
