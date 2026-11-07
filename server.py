@@ -26,6 +26,7 @@ app = FastAPI(title="Ask the Room")
 
 class Ask(BaseModel):
     q: str
+    history: list[dict] = []  # earlier turns [{q, a}], so follow-ups like "show me" make sense
 
 
 @app.on_event("startup")
@@ -119,7 +120,7 @@ async def ask(body: Ask):
         raise HTTPException(400, "empty question")
     t0 = time.time()
     try:
-        result = await memory.answer(q)
+        result = await memory.answer(q, body.history[-3:])
     except Exception as e:
         raise HTTPException(500, f"{type(e).__name__}: {e}")
     result["ms"] = int((time.time() - t0) * 1000)

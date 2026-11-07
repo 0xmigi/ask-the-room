@@ -292,13 +292,18 @@ async def visual_answer(q: str, by_time: list[dict]) -> dict:
         size += len(line) + 1
     lines = [fmt(e)[:300] for e in sorted(chosen, key=lambda e: (e["date"], e["t"]))]
     async with httpx.AsyncClient() as c:
-        raw = "" if speakers.find(words, TALKY.search(q) is not None) else await providers.chat(c, [{"role": "system", "content": PICK_PROMPT},
+        raw = "" if (speakers.find(words, TALKY.search(q) is not None)
+                     or re.search(r"\b\d{1,2}:\d{2}\b", q)) else await providers.chat(c, [{"role": "system", "content": PICK_PROMPT},
                                        {"role": "user", "content": "\n".join(lines) + f"\n\nUser asks: {q}"}],
                                    max_tokens=60)
     m = re.search(r"(\d{1,2}:\d{2}(?::\d{2})?)", raw or "")
     t = m.group(1) if m else hits[0]["t"]
     seg = speakers.find(words, TALKY.search(q) is not None)
-    if seg:  # the speaker timeline knows exactly when this person was on stage
+    explicit = re.search(r"\b(\d{1,2}):(\d{2})(?::(\d{2}))?\b", q)
+    if explicit:  # "show me ... at 11:05": the user (or the previous answer) named the moment
+        h, mnt, sec = explicit.group(1), explicit.group(2), explicit.group(3) or "00"
+        t = f"{int(h):02d}:{mnt}:{sec}"
+    elif seg:  # the speaker timeline knows exactly when this person was on stage
         a = dt.datetime.fromisoformat(f"{seg['date']}T{seg['start']}")
         b = dt.datetime.fromisoformat(f"{seg['date']}T{seg['end']}")
         t = (a + (b - a) * 0.4).strftime("%H:%M:%S")
@@ -319,7 +324,43 @@ async def visual_answer(q: str, by_time: list[dict]) -> dict:
             "sources": [{"t": e["t"], "date": e["date"], "kind": e["kind"], "text": e["text"]} for e in near[:4]]}
 
 
-async def answer(q: str) -> dict:
+REWRITE_PROMPT = (
+    "You turn the user's latest message in a chat about a livestream into a standalone question. "
+    "Use the earlier turns to resolve words like 'that', 'it', 'him', 'her', 'them', 'show me', "
+    "'more', 'what else'. Keep names and any [HH:MM] times the previous answer cited, e.g. "
+    "'show me' after an answer about Kaido at [11:05] becomes 'show me Kaido talking about "
+    "encrypted RDMA at 11:05'. If the message is already standalone, return it unchanged. "
+    "Reply with only the question."
+)
+
+
+async def standalone(q: str, history: list[dict]) -> str:
+    turns = [h for h in history if h.get("q")][-3:]
+    if not turns:
+        return q
+    convo = "\n".join(f"User: {h['q'][:300]}\nAssistant: {str(h.get('a', ''))[:600]}" for h in turns)
+    try:
+        async with httpx.AsyncClient() as c:
+            out = await providers.chat(c, [{"role": "system", "content": REWRITE_PROMPT},
+                                           {"role": "user", "content": f"{convo}\n\nLatest message: {q}"}],
+                                       max_tokens=120)
+        out = out.strip().strip('"')
+        return out if 3 < len(out) < 400 else q
+    except Exception as e:
+        print(f"[memory] rewrite failed: {e!r}")
+        return q
+
+
+async def answer(q: str, history: list[dict] | None = None) -> dict:
+    original = q
+    q = await standalone(q, history or [])
+    result = await _answer(q)
+    if q != original:
+        result["asked_as"] = q
+    return result
+
+
+async def _answer(q: str) -> dict:
     await INDEX.refresh()
     by_time = sorted(INDEX.events, key=lambda e: (e["date"], e["t"]))
     used, text = MODE, ""

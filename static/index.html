@@ -107,6 +107,7 @@
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const chat = $("chat"), log = $("log"), q = $("q");
+const history = [];  // earlier turns, sent along so follow-ups ("show me", "what else?") make sense
 
 function scrollDown() { chat.scrollTo({ top: chat.scrollHeight, behavior: "smooth" }); }
 
@@ -139,7 +140,7 @@ async function ask(text) {
   $("go").disabled = true;
   try {
     const r = await fetch("api/ask", { method: "POST", headers: { "Content-Type": "application/json" },
-                                       body: JSON.stringify({ q: text }) });
+                                       body: JSON.stringify({ q: text, history: history.slice(-3) }) });
     const d = await r.json();
     if (!r.ok) throw new Error(d.detail || r.statusText);
     // each [HH:MM] becomes a small chip; tapping it opens the frame (and an on-request clip)
@@ -160,6 +161,8 @@ async function ask(text) {
     }
     typing.className = "msg them";
     typing.innerHTML = html;
+    history.push({ q: text, a: d.answer });
+    if (d.asked_as) typing.title = "Understood as: " + d.asked_as;
     if (d.media) {
       // visual question: open the moment right away, and start the clip if footage was asked for
       const chip = [...typing.querySelectorAll("button.ts")].find((b) => b.dataset.t === d.media.t)
