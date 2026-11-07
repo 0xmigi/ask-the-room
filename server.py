@@ -7,6 +7,7 @@ import json
 import os
 import re
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
@@ -16,12 +17,51 @@ from pydantic import BaseModel
 
 import memory  # loads .env and configures Cognee before importing it
 import media
+import room_mcp
 import speakers
 
 ROOT = Path(__file__).parent
 COGNIFY_EVERY = int(os.getenv("COGNIFY_EVERY", "180"))
 
-app = FastAPI(title="Ask the Room")
+
+
+async def _sync_loop():
+    while True:
+        try:
+            changed = await speakers.update()
+            if changed:
+                print(f"[speakers] timeline updated ({changed} segments)")
+        except Exception as e:
+            print(f"[speakers] update failed: {e!r}")
+        try:
+            n = await memory.sync()
+            if n:
+                print(f"[memory] added {n} new events")
+        except Exception as e:
+            print(f"[memory] sync failed: {e!r}")
+        await asyncio.sleep(COGNIFY_EVERY)
+
+
+async def _warm_media():
+    while True:
+        await asyncio.to_thread(media.warm)
+        await asyncio.sleep(15)
+
+
+MCP_APP = room_mcp.asgi_app()
+
+
+@asynccontextmanager
+async def lifespan(app):
+    tasks = [asyncio.create_task(_sync_loop()), asyncio.create_task(_warm_media())]
+    room_mcp.room_key()  # make sure a key exists before anyone asks for it
+    async with room_mcp.mcp.session_manager.run():  # MCP endpoint's session manager
+        yield
+    for t in tasks:
+        t.cancel()
+
+
+app = FastAPI(title="Ask the Room", lifespan=lifespan)
 
 
 class Ask(BaseModel):
@@ -29,32 +69,10 @@ class Ask(BaseModel):
     history: list[dict] = []  # earlier turns [{q, a}], so follow-ups like "show me" make sense
 
 
-@app.on_event("startup")
-async def start_sync_loop():
-    async def loop():
-        while True:
-            try:
-                changed = await speakers.update()
-                if changed:
-                    print(f"[speakers] timeline updated ({changed} segments)")
-            except Exception as e:
-                print(f"[speakers] update failed: {e!r}")
-            try:
-                n = await memory.sync()
-                if n:
-                    print(f"[memory] added {n} new events")
-            except Exception as e:
-                print(f"[memory] sync failed: {e!r}")
-            await asyncio.sleep(COGNIFY_EVERY)
-
-    asyncio.create_task(loop())
-
-    async def warm_media():
-        while True:
-            await asyncio.to_thread(media.warm)
-            await asyncio.sleep(15)
-
-    asyncio.create_task(warm_media())
+@app.get("/api/connect")
+def connect():
+    """How to plug your own agent into the room's memory (MCP URL, key, ready-to-paste config)."""
+    return room_mcp.connect_info()
 
 
 @app.get("/")
@@ -127,6 +145,10 @@ async def ask(body: Ask):
     with (ROOT / "data" / "questions.jsonl").open("a") as f:
         f.write(json.dumps({"t": time.strftime("%H:%M:%S"), "q": q, **result}) + "\n")
     return result
+
+
+# MCP for agents: mounted last so the routes above win; KeyGate checks the room key
+app.mount("/", MCP_APP)
 
 
 if __name__ == "__main__":

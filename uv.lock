@@ -3,10 +3,10 @@ revision = 5
 requires-python = ">=3.11, <3.13"
 resolution-markers = [
     "python_full_version >= '3.12' and 'Darwin Kernel Version 22.' not in platform_version and 'Darwin Kernel Version 23.' in platform_version and sys_platform == 'darwin'",
-    "python_full_version < '3.12' and 'Darwin Kernel Version 22.' not in platform_version and 'Darwin Kernel Version 23.' in platform_version and sys_platform == 'darwin'",
     "(python_full_version >= '3.12' and 'Darwin Kernel Version 22.' not in platform_version and 'Darwin Kernel Version 23.' not in platform_version) or (python_full_version >= '3.12' and sys_platform != 'darwin')",
-    "(python_full_version < '3.12' and 'Darwin Kernel Version 22.' not in platform_version and 'Darwin Kernel Version 23.' not in platform_version) or (python_full_version < '3.12' and sys_platform != 'darwin')",
     "python_full_version >= '3.12' and 'Darwin Kernel Version 22.' in platform_version and sys_platform == 'darwin'",
+    "python_full_version < '3.12' and 'Darwin Kernel Version 22.' not in platform_version and 'Darwin Kernel Version 23.' in platform_version and sys_platform == 'darwin'",
+    "(python_full_version < '3.12' and 'Darwin Kernel Version 22.' not in platform_version and 'Darwin Kernel Version 23.' not in platform_version) or (python_full_version < '3.12' and sys_platform != 'darwin')",
     "python_full_version < '3.12' and 'Darwin Kernel Version 22.' in platform_version and sys_platform == 'darwin'",
 ]
 
@@ -213,6 +213,7 @@ dependencies = [
     { name = "cognee" },
     { name = "fastapi" },
     { name = "httpx" },
+    { name = "mcp" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "python-dotenv" },
@@ -224,6 +225,7 @@ requires-dist = [
     { name = "cognee" },
     { name = "fastapi" },
     { name = "httpx" },
+    { name = "mcp", specifier = ">=1.10" },
     { name = "numpy" },
     { name = "python-dotenv" },
     { name = "uvicorn" },
@@ -1409,8 +1411,8 @@ version = "0.17.1"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.12' and 'Darwin Kernel Version 22.' not in platform_version and 'Darwin Kernel Version 23.' in platform_version and sys_platform == 'darwin'",
-    "python_full_version < '3.12' and 'Darwin Kernel Version 22.' not in platform_version and 'Darwin Kernel Version 23.' in platform_version and sys_platform == 'darwin'",
     "python_full_version >= '3.12' and 'Darwin Kernel Version 22.' in platform_version and sys_platform == 'darwin'",
+    "python_full_version < '3.12' and 'Darwin Kernel Version 22.' not in platform_version and 'Darwin Kernel Version 23.' in platform_version and sys_platform == 'darwin'",
     "python_full_version < '3.12' and 'Darwin Kernel Version 22.' in platform_version and sys_platform == 'darwin'",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/7e/f6/1511d2ab4391af8a4133c556ccaf79b613d79c6120e3fcced02c8d438982/ladybug-0.17.1.tar.gz", hash = "sha256:82efea498713c7da7f6f94f80252574599252d26ee10fb11e62ae932b5d8f2ba", size = 10160802, upload-time = "2026-06-02T20:08:43.241Z" }
@@ -1689,6 +1691,44 @@ wheels = [
 ]
 
 [[package]]
+name = "mcp"
+version = "2.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "httpx2" },
+    { name = "jsonschema" },
+    { name = "mcp-types" },
+    { name = "opentelemetry-api" },
+    { name = "pydantic" },
+    { name = "pyjwt", extra = ["crypto"] },
+    { name = "python-multipart" },
+    { name = "pywin32", marker = "sys_platform == 'win32'" },
+    { name = "sse-starlette" },
+    { name = "starlette" },
+    { name = "typing-extensions" },
+    { name = "typing-inspection" },
+    { name = "uvicorn", marker = "sys_platform != 'emscripten'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/9d/8d/e0d339616f4810e9051d4aba6887afab289ab1f81875fe908b606cdfd0e3/mcp-2.3.0.tar.gz", hash = "sha256:8b147a50441cf059dc88c684e0aeed3687f0aa0f39c6cde7b90330effd2b34d8", size = 4171955, upload-time = "2026-10-02T22:06:56.091Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/20/d7/4a2878f128df729db3ca04e71bfce26405cc2e0c9ebe19c592feeb4c61b9/mcp-2.3.0-py3-none-any.whl", hash = "sha256:dd0c44c089d16453e8ae31a3877a0054d7a2314caaa81f5e0541b9b1734b2377", size = 368664, upload-time = "2026-10-02T22:06:52.119Z" },
+]
+
+[[package]]
+name = "mcp-types"
+version = "2.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/9e/2d/7c251e34207f6c51000312fc8839111ac45cfe02023f90b44e7f1051dd8e/mcp_types-2.3.0.tar.gz", hash = "sha256:d1e46549edb35ee19a94940fcee6d1addd7e589ab7ea92dda83f5d84781fc362", size = 65898, upload-time = "2026-10-02T22:06:57.863Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ce/48/32583066b155bb5d4507e7887dc88ee23118cc4de8e2a12870c49719e2a8/mcp_types-2.3.0-py3-none-any.whl", hash = "sha256:968efdbdaedfab06adae40d378a34395f1090c5921d4be3c9cde283aaf76d91d", size = 69108, upload-time = "2026-10-02T22:06:54.099Z" },
+]
+
+[[package]]
 name = "mdurl"
 version = "0.1.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1956,8 +1996,8 @@ version = "1.31.1"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.12' and 'Darwin Kernel Version 22.' not in platform_version and 'Darwin Kernel Version 23.' in platform_version and sys_platform == 'darwin'",
-    "python_full_version < '3.12' and 'Darwin Kernel Version 22.' not in platform_version and 'Darwin Kernel Version 23.' in platform_version and sys_platform == 'darwin'",
     "(python_full_version >= '3.12' and 'Darwin Kernel Version 22.' not in platform_version and 'Darwin Kernel Version 23.' not in platform_version) or (python_full_version >= '3.12' and sys_platform != 'darwin')",
+    "python_full_version < '3.12' and 'Darwin Kernel Version 22.' not in platform_version and 'Darwin Kernel Version 23.' in platform_version and sys_platform == 'darwin'",
     "(python_full_version < '3.12' and 'Darwin Kernel Version 22.' not in platform_version and 'Darwin Kernel Version 23.' not in platform_version) or (python_full_version < '3.12' and sys_platform != 'darwin')",
 ]
 dependencies = [
@@ -2924,6 +2964,19 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/b8/93/cedd3e86d49841c9509979dce3f4470243691fbd5c5227d2988d4903531e/sqlglot-30.30.0.tar.gz", hash = "sha256:b8e344042c85d7baa1d0d827127dfe1611ce9ac59bceab6fe370665baeb14ce7", size = 6186227, upload-time = "2026-11-06T13:54:57.133Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/bc/1f/2472bab660417265daa9cf6baf7870583bfbd447608b525b0071cc4c5448/sqlglot-30.30.0-py3-none-any.whl", hash = "sha256:06c4c212a7868c7dcff0fd0fda348dd3c5cbad40137b3083a70ecdfe22921cf9", size = 807597, upload-time = "2026-11-06T13:54:54.435Z" },
+]
+
+[[package]]
+name = "sse-starlette"
+version = "3.7.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "starlette" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/41/43/a232e3cd804293bd4f6d01e8895bc0f6f83ea148d712baf9d783c7d93d23/sse_starlette-3.7.0.tar.gz", hash = "sha256:326416da2ab52e9a41b3f409d3ff897eda45aa68c9f3b7b17d0913aab8d219c3", size = 43869, upload-time = "2026-11-07T11:15:49.389Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6a/11/25cabac0a24fa76f58637d8671b549c90d818d69d26beecf0c59a3b186e0/sse_starlette-3.7.0-py3-none-any.whl", hash = "sha256:f1d3136caa12d129284fca3d2ded79bc9af943320b6472712955fea52a6d3eea", size = 18432, upload-time = "2026-11-07T11:15:47.86Z" },
 ]
 
 [[package]]

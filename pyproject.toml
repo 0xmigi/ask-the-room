@@ -10,4 +10,5 @@ dependencies = [
   "httpx",
   "python-dotenv",
   "numpy",
+  "mcp>=1.10",
 ]

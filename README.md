@@ -37,6 +37,30 @@ X livestream ──yt-dlp──► HLS ──ffmpeg (one process)
 | `media.py` | Any moment can be shown on request: tap a timestamp in an answer for the frame and a 30 s clip, or ask "show me…". Cuts only the needed HLS segments, so it takes seconds, and remembers every stream link so earlier broadcasts keep working. | |
 | `server.py` + `static/index.html` | Phone page: question box, live status, and answers with clickable timestamps and source lines. | |
 
+## Plug your agent into the room
+
+The memory is also an **MCP server**, so people building at the event can give their own agent
+(Claude Code, Cursor, any MCP client) instant context on every talk, slide and speaker. Open the
+chat page, tap **Connect your agent**, and paste the command, e.g.:
+
+```bash
+claude mcp add --transport http ask-the-room http://<laptop-ip>:8000/mcp --header "Authorization: Bearer <ROOM_KEY>"
+```
+
+| Tool | What it returns |
+|---|---|
+| `ask(question)` | An answer citing `[HH:MM]` times, the source lines, and frame/clip links for "show me" questions |
+| `search(query, limit)` | Timestamped speech and slide lines with speaker names, best matches first |
+| `recent(minutes)` | Everything from the last N minutes |
+| `transcript(start, end)` | Raw lines between two times |
+| `speakers_timeline()` | Who presented when |
+| `moment(time)` | Links to the video frame and a 30 s clip |
+
+**Access:** one shared memory per room, gated by a room key (`ROOM_KEY` in `.env`, generated on
+first run and shown on the chat page). Being in the room, on the same network and seeing the page,
+is what gets you in. Cognee itself supports per-user, per-dataset permissions if you need
+separate rooms or read-only guests.
+
 ## Run it
 
 Needs macOS or Linux, `ffmpeg`, `yt-dlp`, `uv`, and a Superlinked key from [console.superlinked.com](https://console.superlinked.com) (free credits, no card). Darkbloom works too: set `PROVIDER=darkbloom` and `DARKBLOOM_API_KEY`.
