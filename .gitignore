@@ -7,3 +7,5 @@ data/
 .cognee/
 *.log
 .DS_Store
+transcript.md
+slides.md
