@@ -93,8 +93,19 @@ def ready(path: Path, newest: Path | None) -> bool:
     return time.time() - path.stat().st_mtime > 75
 
 
+REPEAT = re.compile(r"(\b.{6,120}?)(?:[\s,.!?]+\1\b){2,}", re.I | re.S)
+
+
+def collapse_repeats(text: str) -> str:
+    """Whisper sometimes loops on noisy audio ("it's not a lot of money, but it's not a lot of ...")."""
+    prev = None
+    while prev != text:
+        prev, text = text, REPEAT.sub(r"\1", text)
+    return text.strip()
+
+
 async def transcribe(client: httpx.AsyncClient, wav: Path) -> str:
-    return await providers.transcribe(client, wav)
+    return collapse_repeats(await providers.transcribe(client, wav))
 
 
 async def describe(client: httpx.AsyncClient, jpg: Path) -> str:

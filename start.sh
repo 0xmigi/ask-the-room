@@ -4,6 +4,7 @@
 cd "$(dirname "$0")"
 [ -f .env ] || { echo "copy .env.example to .env and add your Superlinked key (SIE_API_KEY)"; exit 1; }
 set -a; . ./.env; set +a
+export PYTHONUNBUFFERED=1   # so ingest.log / server.log update live
 trap 'kill 0' EXIT
 
 if ! curl -s -m 2 "${SIE_URL:-http://localhost:8080}/healthz" >/dev/null; then
