@@ -3,7 +3,8 @@
 #   ./record.sh                       # uses STREAM_URL from .env
 #   ./record.sh https://x.com/i/broadcasts/...
 #   ./record.sh test.mp4              # a local file, played in real time (for testing)
-# Restarts automatically when the HLS token expires or the connection drops.
+# Restarts automatically when the HLS token expires or the connection drops, and re-reads
+# STREAM_URL from .env on every retry: paste a new broadcast link into .env, no restart needed.
 set -u
 cd "$(dirname "$0")"
 [ -f .env ] && set -a && . ./.env && set +a
@@ -41,6 +42,10 @@ record_once() {
 caffeinate -i -w $$ &
 
 while true; do
+  if [ -z "${1:-}" ] && [ -f .env ]; then
+    NEW="$(grep -E '^STREAM_URL=' .env | tail -1 | cut -d= -f2-)"
+    [ -n "$NEW" ] && [ "$NEW" != "$SRC" ] && { echo "[record] new STREAM_URL: $NEW"; SRC="$NEW"; }
+  fi
   record_once
   [ -f "$SRC" ] && { echo "[record] file finished"; break; }
   echo "[record] ffmpeg stopped, retrying in 3 s"

@@ -148,6 +148,7 @@ async function ask(text) {
       const k = s.t.slice(0, 5);
       if (!exact[k] || s.kind === "slide") exact[k] = { t: s.t, date: s.date || "" };
     }
+    if (d.media) exact[d.media.t.slice(0, 5)] = { t: d.media.t, date: d.media.date || "" };
     let html = esc(d.answer).replace(/\[(\d{1,2}:\d{2})\]/g, (_, hm) => {
       const x = exact[hm] || { t: hm + ":00", date: "" };
       return `<button type="button" class="ts" data-t="${x.t}" data-date="${x.date}" title="Show this moment">${hm}</button>`;
@@ -159,6 +160,15 @@ async function ask(text) {
     }
     typing.className = "msg them";
     typing.innerHTML = html;
+    if (d.media) {
+      // visual question: open the moment right away, and start the clip if footage was asked for
+      const chip = [...typing.querySelectorAll("button.ts")].find((b) => b.dataset.t === d.media.t)
+                   || typing.querySelector("button.ts");
+      if (chip) {
+        toggleMoment(chip);
+        if (d.media.play) playClip(typing.querySelector(".media .play"));
+      }
+    }
   } catch (e) {
     typing.className = "msg them";
     typing.textContent = "Sorry, something went wrong: " + e.message;

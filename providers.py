@@ -50,7 +50,8 @@ async def chat(client: httpx.AsyncClient, messages: list, max_tokens: int = 600)
     if PROVIDER == "superlinked":
         body["temperature"] = 0
     r = await client.post(f"{BASE}/chat/completions", headers=HEADERS, json=body, timeout=120)
-    r.raise_for_status()
+    if r.status_code >= 400:  # keep the provider's explanation in the error
+        raise httpx.HTTPStatusError(f"{r.status_code} from {BASE}: {r.text[:300]}", request=r.request, response=r)
     choices = r.json().get("choices") or []
     return _strip_thinking(choices[0]["message"].get("content") if choices else "")
 

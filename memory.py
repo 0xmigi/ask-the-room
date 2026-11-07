@@ -153,11 +153,22 @@ INDEX = Index()
 
 
 # ---------- answer (direct path) ----------
+MAX_CTX_CHARS = 14000  # Superlinked's Qwen3.8-27B has an 8k-token window; ~4k tokens of lines is safe
+
+
+def fit(lines: list[str], max_chars: int = MAX_CTX_CHARS, keep: str = "end") -> list[str]:
+    """Shorten long lines and drop lines until the total fits the model's context window."""
+    lines = [l if len(l) <= 300 else l[:297] + "..." for l in lines]
+    while lines and sum(len(l) + 1 for l in lines) > max_chars:
+        lines.pop(0 if keep == "end" else -1)
+    return lines
+
+
 async def llm_answer(q: str, lines: list[str]) -> str:
     async with httpx.AsyncClient() as c:
         return await providers.chat(c, [
             {"role": "system", "content": answer_prompt()},
-            {"role": "user", "content": "Livestream lines:\n" + "\n".join(lines) + f"\n\nQuestion: {q}"},
+            {"role": "user", "content": "Livestream lines:\n" + "\n".join(fit(lines)) + f"\n\nQuestion: {q}"},
         ])
 
 
@@ -205,10 +216,85 @@ def _flatten(results) -> str:
     return "\n".join(parts).strip()
 
 
+VISUAL = re.compile(r"\b(show( me)?|footage|clip|video|watch|picture|photo|image|screenshot|frame)\b|"
+                    r"\blooks? like\b|\bwhat did .{1,40} look\b|\bwhat (is|was) .{1,30} wearing\b", re.I)
+WANTS_CLIP = re.compile(r"\b(footage|clip|video|watch|play)\b", re.I)
+
+PICK_PROMPT = (
+    "The user wants to SEE something from a livestream. Below are timestamped lines from it. "
+    "Pick the single moment whose video frame would best show what they ask for. If they name a "
+    "person, pick a time while that person was presenting or speaking (people are usually thanked "
+    "right AFTER their talk, so pick a few minutes earlier, during their slides). If they ask for a "
+    "slide or topic, pick when it was on screen. Reply with only JSON like {\"t\": \"HH:MM:SS\"}."
+)
+
+
+STOP = {"what", "does", "look", "like", "looks", "show", "footage", "clip", "video", "picture", "photo",
+        "image", "screenshot", "frame", "from", "with", "that", "this", "when", "where", "they", "them",
+        "their", "talk", "about", "give", "please", "watch", "see", "stream", "slide", "slides", "the"}
+
+
+def _look_prompt(q: str, t: str, named: bool = False) -> str:
+    hint = (" The transcript says the person asked about was presenting around this time, so they are "
+            "most likely the presenter visible here; describe that presenter.") if named else ""
+    return (f"A viewer of a hackathon livestream asked: \"{q}\". This is the stream at {t[:5]}.{hint} "
+            "Answer from what is visible, in 1-3 sentences. The presenter is often in the small "
+            "camera window in a corner. Describe appearance and what is on screen. If the frame "
+            "doesn't show what was asked, say what it does show.")
+
+
+async def visual_answer(q: str, by_time: list[dict]) -> dict:
+    """'Show me X' / 'what does X look like': pick the moment, look at the frame, attach media."""
+    import media  # local import: media is only needed for these questions
+    hits = await INDEX.top(q, k=16)
+    # names ("kaido") are rare words that embeddings rank poorly: add exact-word matches, plus the
+    # 12 minutes before each one (people get thanked after their talk, so the talk is before)
+    words = {w for w in re.findall(r"[a-z][a-z0-9'-]{3,}", q.lower()) if w not in STOP}
+    named = [e for e in by_time if any(re.search(rf"\b{re.escape(w)}\b", e["text"].lower()) for w in words)]
+    around = [e for n in named[:3] for e in by_time
+              if 0 <= event_epoch(n) - event_epoch(e) <= 720]
+    pool, seen_keys = [], set()
+    for e in named + around + hits:  # priority order
+        k = (e["date"], e["t"], e["kind"])
+        if k not in seen_keys:
+            seen_keys.add(k)
+            pool.append(e)
+    chosen, size = [], 0
+    for e in pool:
+        line = fmt(e)[:300]
+        if size + len(line) > MAX_CTX_CHARS:
+            break
+        chosen.append(e)
+        size += len(line) + 1
+    lines = [fmt(e)[:300] for e in sorted(chosen, key=lambda e: (e["date"], e["t"]))]
+    async with httpx.AsyncClient() as c:
+        raw = await providers.chat(c, [{"role": "system", "content": PICK_PROMPT},
+                                       {"role": "user", "content": "\n".join(lines) + f"\n\nUser asks: {q}"}],
+                                   max_tokens=60)
+    m = re.search(r"(\d{1,2}:\d{2}(?::\d{2})?)", raw or "")
+    t = m.group(1) if m else hits[0]["t"]
+    t = t if t.count(":") == 2 else t + ":00"
+    t = f"{int(t[:t.index(':')]):02d}{t[t.index(':'):]}"
+    date = (hits[0] if hits else by_time[-1])["date"]
+    try:
+        frame = await media.frame(t, date)
+        async with httpx.AsyncClient() as c:
+            seen = await providers.describe_image(c, frame, _look_prompt(q, t, bool(named)))
+    except Exception as e:
+        print(f"[memory] visual answer: no frame for {t}: {e!r}")
+        seen = "I couldn't get the video for that moment."
+    near = [e for e in by_time if abs(event_epoch(e) - dt.datetime.fromisoformat(f"{date}T{t}").timestamp()) <= 90]
+    return {"answer": f"{seen} [{t[:5]}]", "memory": "vision",
+            "media": {"t": t, "date": date, "play": bool(WANTS_CLIP.search(q))},
+            "sources": [{"t": e["t"], "date": e["date"], "kind": e["kind"], "text": e["text"]} for e in near[:4]]}
+
+
 async def answer(q: str) -> dict:
     await INDEX.refresh()
     by_time = sorted(INDEX.events, key=lambda e: (e["date"], e["t"]))
     used, text = MODE, ""
+    if VISUAL.search(q) and by_time:
+        return await visual_answer(q, by_time)
 
     m = RECENT.search(q)
     lagging = len(INDEX.events) - synced_count() > 20
