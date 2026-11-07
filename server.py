@@ -48,7 +48,7 @@ def index():
 @app.get("/api/status")
 def status():
     events = memory.read_events()
-    last = events[-1] if events else None
+    last = max(events, key=lambda e: (e["date"], e["t"])) if events else None
     age = None
     if last:
         age = time.time() - memory.event_epoch(last)

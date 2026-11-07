@@ -47,6 +47,8 @@ for k, v in {
     # one local process, one user: skip multi-tenant auth and the Q&A session cache
     "ENABLE_BACKEND_ACCESS_CONTROL": "false",
     "CACHING": "false",
+    # graph extraction returns a big JSON; the default cap cut it off mid-object
+    "LLM_MAX_COMPLETION_TOKENS": "16384",
 }.items():
     os.environ.setdefault(k, v)
 
@@ -54,12 +56,24 @@ if MODE == "cognee":
     import cognee
     from cognee import SearchType
 
-ANSWER_PROMPT = (
-    "You are the shared memory of a live event. You are given timestamped lines from the "
-    "livestream: what speakers said and what was on screen. Answer the question in 1-4 short "
-    "sentences using only that material. Always cite the time each fact comes from like "
-    "[13:42]. If the material doesn't cover it, say you didn't hear that yet."
+BASE_PROMPT = (
+    "You are the shared memory of a live event that is still being livestreamed. You are given "
+    "timestamped lines from the stream: what speakers said and what was on screen. Answer the "
+    "question in 1-4 short sentences using only that material. Always cite the time each fact "
+    "comes from like [13:42]. If the material doesn't cover it, say you didn't hear that yet. "
+    "The stream has NOT ended: the newest line is just the latest minute processed, so never "
+    "say the stream concluded or finished."
 )
+
+
+def answer_prompt() -> str:
+    return BASE_PROMPT + f" The time now is {dt.datetime.now():%H:%M}."
+
+
+ANSWER_PROMPT = BASE_PROMPT  # kept for imports
+
+RECENT = re.compile(r"\blast\s+(\d+|few|couple of)?\s*(min|minute)s?\b|\b(right now|just now|currently|"
+                    r"latest|most recent|happening now|on screen now|what'?s happening)\b", re.I)
 QUERY_PREFIX = "Represent this sentence for searching relevant passages: "  # bge query instruction
 
 
@@ -138,32 +152,46 @@ class Index:
 INDEX = Index()
 
 
-# ---------- answer (fallback path) ----------
+# ---------- answer (direct path) ----------
 async def llm_answer(q: str, lines: list[str]) -> str:
     async with httpx.AsyncClient() as c:
         return await providers.chat(c, [
-            {"role": "system", "content": ANSWER_PROMPT},
+            {"role": "system", "content": answer_prompt()},
             {"role": "user", "content": "Livestream lines:\n" + "\n".join(lines) + f"\n\nQuestion: {q}"},
         ])
 
 
 # ---------- public API used by server.py ----------
+SYNC_BATCH = 40  # events per add+cognify round
+DOC_LINES = 8    # lines per Cognee document (keeps graph-extraction JSON small)
+
+
 async def sync() -> int:
-    """Push new events into Cognee (add + cognify) and the SIE index. Returns # of new events."""
+    """Push new events into Cognee (add + cognify) in small batches. Returns # of events synced."""
     await INDEX.refresh()
     events = read_events()
     st = _state()
-    new = events[st["synced"]:]
-    if not new:
-        return 0
-    if MODE == "cognee":
-        doc = (f"Livestream notes {new[0]['date']}, {new[0]['t'][:5]}-{new[-1]['t'][:5]}\n"
-               + "\n".join(fmt(e) for e in new))
-        await cognee.add(doc, dataset_name=DATASET)
-        await cognee.cognify(datasets=[DATASET])
-    st["synced"] = len(events)
-    STATE.write_text(json.dumps(st))
-    return len(new)
+    total = 0
+    while st["synced"] < len(events):
+        batch = events[st["synced"]:st["synced"] + SYNC_BATCH]
+        if MODE == "cognee":
+            ordered = sorted(batch, key=lambda e: (e["date"], e["t"]))
+            docs = [f"Livestream notes {part[0]['date']}, {part[0]['t'][:5]}-{part[-1]['t'][:5]}\n"
+                    + "\n".join(fmt(e) for e in part)
+                    for part in (ordered[i:i + DOC_LINES] for i in range(0, len(ordered), DOC_LINES))]
+            for attempt in (1, 2):
+                try:
+                    await cognee.add(docs, dataset_name=DATASET)
+                    await cognee.cognify(datasets=[DATASET])
+                    break
+                except Exception as e:
+                    print(f"[memory] cognify failed (attempt {attempt}): {str(e)[:200]}")
+            # after two failures we move on; the SIE index still has these lines
+        st["synced"] += len(batch)
+        STATE.write_text(json.dumps(st))
+        total += len(batch)
+        print(f"[memory] synced {st['synced']}/{len(events)}")
+    return total
 
 
 def _flatten(results) -> str:
@@ -178,27 +206,40 @@ def _flatten(results) -> str:
 
 
 async def answer(q: str) -> dict:
-    hits = await INDEX.top(q, k=10)
-    recent = INDEX.events[-8:]  # helps "what's on screen now / last 10 minutes" questions
-    used = MODE
-    text = ""
-    if MODE == "cognee" and synced_count() > 0:
+    await INDEX.refresh()
+    by_time = sorted(INDEX.events, key=lambda e: (e["date"], e["t"]))
+    used, text = MODE, ""
+
+    m = RECENT.search(q)
+    lagging = len(INDEX.events) - synced_count() > 20
+    if m:
+        # "last N minutes" / "right now": answer from the time window directly, newest lines
+        n = m.group(1)
+        mins = int(n) if n and n.isdigit() else 10
+        cutoff = dt.datetime.now().timestamp() - mins * 60
+        window = [e for e in by_time if event_epoch(e) >= cutoff] or by_time[-8:]
+        text = await llm_answer(q, [fmt(e) for e in window[-60:]])
+        used = "recent window"
+    elif MODE == "cognee" and synced_count() > 0 and not lagging:
         try:
             res = await cognee.search(query_text=q, query_type=SearchType.HYBRID_COMPLETION,
-                                      datasets=[DATASET], system_prompt=ANSWER_PROMPT, top_k=12)
+                                      datasets=[DATASET], system_prompt=answer_prompt(), top_k=12)
             text = _flatten(res)
+            if "didn't hear" in text.lower() or "did not hear" in text.lower():
+                text, used = "", "simple (cognee had nothing)"
         except Exception as e:
             print(f"[memory] cognee search failed, using SIE fallback: {e!r}")
             used = "simple (cognee error)"
     elif MODE == "cognee":
-        used = "simple (cognee warming up)"
+        used = "simple (cognee catching up)"
     if not text:
-        ctx = {id(e): e for e in hits + recent}.values()
-        lines = [fmt(e) for e in sorted(ctx, key=lambda e: e["t"])]
+        hits = await INDEX.top(q, k=14)
+        ctx = {id(e): e for e in hits + by_time[-6:]}.values()
+        lines = [fmt(e) for e in sorted(ctx, key=lambda e: (e["date"], e["t"]))]
         text = await llm_answer(q, lines) if lines else "Nothing recorded yet."
 
     # Sources: only the lines whose timestamps the answer actually cites
-    cited = set(re.findall(r"\[(\d{1,2}:\d{2})", text))
-    sources = [e for e in INDEX.events if e["t"][:5] in cited][:6]
+    cited = set(re.findall(r"(?<![\d:])(\d{1,2}:\d{2})(?!:\d)", text))
+    sources = [e for e in by_time if e["t"][:5] in cited][:6]
     return {"answer": text, "memory": used,
             "sources": [{"t": e["t"], "kind": e["kind"], "text": e["text"]} for e in sources]}

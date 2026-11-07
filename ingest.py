@@ -31,6 +31,15 @@ for d in (AUDIO, FRAMES, DATA):
 HALLUCINATIONS = re.compile(
     r"^(thank you( for watching)?|thanks for watching|you|bye|\.+|music|\[.*\])[.!]?$", re.I
 )
+# ...and these "subtitle credits" from its training data, in any language
+CREDITS = re.compile(r"subtit|DimaTorzok|amara\.org|Продолжение следует|字幕|sous-titr|untertitel", re.I)
+
+
+def is_junk(text: str) -> bool:
+    letters = [c for c in text if c.isalpha()]
+    latin = sum(c.isascii() for c in letters)
+    return (len(text) <= 3 or bool(HALLUCINATIONS.match(text)) or bool(CREDITS.search(text))
+            or (len(letters) > 10 and latin / len(letters) < 0.6))  # stream is in English
 
 VISION_PROMPT = (
     "This is a frame from a livestream of a hackathon. Ignore the broadcast overlay: the "
@@ -150,7 +159,7 @@ async def main():
                 try:
                     if p.suffix == ".wav":
                         text = await transcribe(client, p)
-                        if len(text) > 3 and not HALLUCINATIONS.match(text):
+                        if not is_junk(text):
                             append_event({"date": today, "t": t, "kind": "speech",
                                           "speaker": speaker_for(t[:5], schedule),
                                           "text": text, "src": f"audio/{p.name}"})

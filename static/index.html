@@ -2,108 +2,157 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <title>Ask the Room</title>
 <style>
   :root {
-    --bg: #f6f4ef; --fg: #1b1a17; --muted: #6f6a60; --card: #fff; --line: #e3dfd5;
-    --accent: #d2421f; --chip: #f1e7df;
+    --bg: #f6f4ef; --fg: #1b1a17; --muted: #77716a; --line: #e3dfd5;
+    --me: #d2421f; --me-fg: #fff; --them: #ffffff; --chip: #efe8df; --src: #f6f1ea;
   }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #141311; --fg: #f1eee7; --muted: #9a9488; --card: #1e1c19; --line: #2e2b26;
-            --accent: #ff6a3d; --chip: #2d221d; }
+    :root { --bg: #121110; --fg: #f1eee7; --muted: #9a9488; --line: #2a2723;
+            --me: #ff6a3d; --me-fg: #1b0d07; --them: #1f1d1a; --chip: #26221e; --src: #191715; }
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--fg);
-         font: 17px/1.45 -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif; }
-  main { max-width: 640px; margin: 0 auto; padding: 24px 16px 120px; }
-  h1 { font-size: 28px; letter-spacing: -0.02em; margin: 8px 0 2px; }
-  .status { color: var(--muted); font-size: 14px; display: flex; gap: 8px; align-items: center; }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
-  .dot.live { background: var(--accent); animation: pulse 1.6s infinite; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--fg); display: flex; flex-direction: column;
+         font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif; }
+  header { position: sticky; top: 0; z-index: 2; background: var(--bg); border-bottom: 1px solid var(--line);
+           padding: calc(10px + env(safe-area-inset-top)) 16px 10px; }
+  .hwrap { max-width: 680px; margin: 0 auto; display: flex; align-items: center; gap: 12px; }
+  .avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--me); color: var(--me-fg);
+            display: grid; place-items: center; font-weight: 700; flex: none; }
+  h1 { font-size: 17px; margin: 0; letter-spacing: -0.01em; }
+  .status { color: var(--muted); font-size: 13px; display: flex; gap: 6px; align-items: center; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.live { background: #2fb344; animation: pulse 1.6s infinite; }
   @keyframes pulse { 50% { opacity: .35; } }
-  form { position: fixed; left: 0; right: 0; bottom: 0; padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
-         background: var(--bg); border-top: 1px solid var(--line); }
-  .row { max-width: 640px; margin: 0 auto; display: flex; gap: 8px; }
-  input { flex: 1; min-width: 0; font: inherit; padding: 12px 14px; border-radius: 12px;
-          border: 1px solid var(--line); background: var(--card); color: var(--fg); }
-  button { font: inherit; font-weight: 600; padding: 0 18px; border: 0; border-radius: 12px;
-           background: var(--accent); color: #fff; }
-  button:disabled { opacity: .5; }
-  .suggest { display: flex; flex-wrap: wrap; gap: 8px; margin: 20px 0; }
-  .suggest button { background: var(--chip); color: var(--fg); font-weight: 500; padding: 8px 12px; font-size: 15px; }
-  .qa { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; margin: 14px 0; }
-  .q { font-weight: 600; margin-bottom: 8px; }
-  .a { white-space: pre-wrap; }
-  .a.thinking { color: var(--muted); }
-  .src { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
-  .src div { font-size: 14px; color: var(--muted); border-left: 3px solid var(--accent); padding-left: 8px; }
+
+  #chat { flex: 1; overflow-y: auto; padding: 16px 16px 8px; }
+  .cwrap { max-width: 680px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; }
+  .msg { max-width: 85%; padding: 10px 14px; border-radius: 18px; white-space: pre-wrap; word-wrap: break-word; }
+  .me { align-self: flex-end; background: var(--me); color: var(--me-fg); border-bottom-right-radius: 6px; }
+  .them { align-self: flex-start; background: var(--them); border: 1px solid var(--line); border-bottom-left-radius: 6px; }
+  .them .ts { display: inline-block; font-variant-numeric: tabular-nums; font-weight: 600; font-size: 13px;
+              background: var(--chip); border-radius: 6px; padding: 0 5px; margin: 0 1px; }
+  .typing span { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--muted);
+                 margin-right: 4px; animation: bounce 1.2s infinite; }
+  .typing span:nth-child(2) { animation-delay: .15s; } .typing span:nth-child(3) { animation-delay: .3s; }
+  @keyframes bounce { 0%, 60%, 100% { transform: translateY(0); opacity: .5; } 30% { transform: translateY(-4px); opacity: 1; } }
+  details { margin-top: 8px; font-size: 13px; color: var(--muted); }
+  summary { cursor: pointer; list-style: none; } summary::-webkit-details-marker { display: none; }
+  summary::before { content: "▸ "; } details[open] summary::before { content: "▾ "; }
+  .src { margin-top: 6px; display: flex; flex-direction: column; gap: 6px; }
+  .src div { background: var(--src); border-radius: 8px; padding: 6px 8px; white-space: normal; }
   .src b { color: var(--fg); font-variant-numeric: tabular-nums; }
+  .intro { text-align: center; color: var(--muted); font-size: 14px; margin: 8px auto 4px; max-width: 34ch; }
+  .suggest { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 4px 0 8px; }
+  .suggest button { font: inherit; font-size: 14px; border: 1px solid var(--line); background: var(--them);
+                    color: var(--fg); padding: 7px 12px; border-radius: 999px; cursor: pointer; }
+
+  form { border-top: 1px solid var(--line); background: var(--bg);
+         padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); }
+  .row { max-width: 680px; margin: 0 auto; display: flex; gap: 8px; align-items: flex-end; }
+  textarea { flex: 1; min-width: 0; resize: none; font: inherit; line-height: 1.35; max-height: 120px;
+             padding: 10px 14px; border-radius: 20px; border: 1px solid var(--line); background: var(--them); color: var(--fg); }
+  textarea:focus { outline: 2px solid color-mix(in srgb, var(--me) 40%, transparent); border-color: transparent; }
+  #go { flex: none; width: 42px; height: 42px; border-radius: 50%; border: 0; background: var(--me); color: var(--me-fg);
+        display: grid; place-items: center; cursor: pointer; }
+  #go:disabled { opacity: .4; }
 </style>
 </head>
 <body>
-<main>
-  <h1>Ask the Room</h1>
-  <div class="status"><span class="dot" id="dot"></span><span id="status">connecting…</span></div>
+<header>
+  <div class="hwrap">
+    <div class="avatar">AR</div>
+    <div>
+      <h1>Ask the Room</h1>
+      <div class="status"><span class="dot" id="dot"></span><span id="status">connecting…</span></div>
+    </div>
+  </div>
+</header>
+
+<div id="chat"><div class="cwrap" id="log">
+  <p class="intro">I've been listening to the stream all day. Ask me anything that was said or shown.</p>
   <div class="suggest" id="suggest">
-    <button type="button">What did dmarz say at kickoff?</button>
-    <button type="button">What was on the last slide?</button>
+    <button type="button">What happened at kickoff?</button>
+    <button type="button">What are the prize tracks?</button>
     <button type="button">Summarize the last 10 minutes</button>
   </div>
-  <div id="log"></div>
-</main>
+</div></div>
+
 <form id="f">
   <div class="row">
-    <input id="q" placeholder="Ask about anything said or shown…" autocomplete="off" enterkeyhint="send">
-    <button id="go">Ask</button>
+    <textarea id="q" rows="1" placeholder="Ask about the stream…" enterkeyhint="send"></textarea>
+    <button id="go" aria-label="Send">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+    </button>
   </div>
 </form>
+
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const chat = $("chat"), log = $("log"), q = $("q");
+
+function scrollDown() { chat.scrollTo({ top: chat.scrollHeight, behavior: "smooth" }); }
+
+function bubble(cls, html) {
+  const el = document.createElement("div");
+  el.className = "msg " + cls;
+  el.innerHTML = html;
+  log.appendChild(el);
+  scrollDown();
+  return el;
+}
 
 async function status() {
   try {
     const s = await (await fetch("api/status")).json();
     const live = s.last_event_age_s !== null && s.last_event_age_s < 180;
     $("dot").className = "dot" + (live ? " live" : "");
-    $("status").textContent = `${live ? "Listening" : "Idle"} · ${s.speech} lines, ${s.slides} slides` +
-      (s.last_t ? ` · last at ${s.last_t.slice(0, 5)}` : "") + ` · memory: ${s.memory}`;
+    const mins = s.speech;  // one line per ~60 s chunk with speech
+    $("status").textContent = (live ? "Listening live" : "Not live") +
+      ` · ${mins >= 60 ? (mins / 60).toFixed(1) + " h" : mins + " min"} remembered` +
+      (s.slides ? ` · ${s.slides} slides` : "");
   } catch { $("status").textContent = "offline"; }
 }
 status(); setInterval(status, 15000);
 
-async function ask(q) {
-  const card = document.createElement("div");
-  card.className = "qa";
-  card.innerHTML = `<div class="q">${esc(q)}</div><div class="a thinking">Thinking…</div>`;
-  $("log").prepend(card);
+async function ask(text) {
+  $("suggest")?.remove();
+  bubble("me", esc(text));
+  const typing = bubble("them typing", "<span></span><span></span><span></span>");
   $("go").disabled = true;
   try {
     const r = await fetch("api/ask", { method: "POST", headers: { "Content-Type": "application/json" },
-                                       body: JSON.stringify({ q }) });
+                                       body: JSON.stringify({ q: text }) });
     const d = await r.json();
     if (!r.ok) throw new Error(d.detail || r.statusText);
-    const a = card.querySelector(".a");
-    a.className = "a"; a.textContent = d.answer;
+    let html = esc(d.answer).replace(/\[(\d{1,2}:\d{2})\]/g, '<span class="ts">$1</span>');
     if (d.sources?.length) {
-      const src = document.createElement("div");
-      src.className = "src";
-      src.innerHTML = d.sources.map((s) =>
-        `<div><b>${esc(s.t.slice(0, 5))}</b> ${s.kind === "slide" ? "🖼 " : ""}${esc(s.text.slice(0, 160))}${s.text.length > 160 ? "…" : ""}</div>`).join("");
-      card.appendChild(src);
+      html += `<details><summary>${d.sources.length} source${d.sources.length > 1 ? "s" : ""}</summary><div class="src">` +
+        d.sources.map((s) => `<div><b>${esc(s.t.slice(0, 5))}</b> ${s.kind === "slide" ? "🖼 " : ""}${esc(s.text.slice(0, 220))}${s.text.length > 220 ? "…" : ""}</div>`).join("") +
+        "</div></details>";
     }
+    typing.className = "msg them";
+    typing.innerHTML = html;
   } catch (e) {
-    card.querySelector(".a").textContent = "Error: " + e.message;
-  } finally { $("go").disabled = false; }
+    typing.className = "msg them";
+    typing.textContent = "Sorry, something went wrong: " + e.message;
+  } finally { $("go").disabled = false; scrollDown(); }
 }
 
-$("f").addEventListener("submit", (e) => {
-  e.preventDefault();
-  const q = $("q").value.trim();
-  if (q) { ask(q); $("q").value = ""; $("q").blur(); }
-});
-$("suggest").addEventListener("click", (e) => { if (e.target.tagName === "BUTTON") ask(e.target.textContent); });
+function send() {
+  const text = q.value.trim();
+  if (!text) return;
+  q.value = ""; q.style.height = "";
+  ask(text);
+}
+$("f").addEventListener("submit", (e) => { e.preventDefault(); send(); });
+q.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });
+q.addEventListener("input", () => { q.style.height = ""; q.style.height = Math.min(q.scrollHeight, 120) + "px"; });
+log.addEventListener("click", (e) => { if (e.target.matches(".suggest button")) ask(e.target.textContent); });
 </script>
 </body>
 </html>
