@@ -150,8 +150,23 @@ class Index:
             return []
         qv = (await embed([QUERY_PREFIX + q]))[0]
         scores = self.vecs @ qv
+        # keyword boost: each line is a whole minute of speech, so a one-line joke gets blurred in
+        # the embedding; exact words from the question ("vibe", "equipment") pull it back up
+        words = [w for w in re.findall(r"[a-z][a-z0-9'-]{2,}", q.lower()) if w not in SEARCH_STOP]
+        if words:
+            stems = [w[:5] for w in words]
+            lex = np.array([sum(st in e["text"].lower() for st in stems) / len(stems) for e in self.events],
+                           dtype=np.float32)
+            scores = scores + 0.35 * lex
         return [self.events[i] for i in np.argsort(-scores)[:k]]
 
+
+SEARCH_STOP = {"the", "and", "was", "were", "what", "who", "whom", "did", "does", "said", "say", "says",
+               "about", "with", "that", "this", "they", "them", "anyone", "someone", "any", "today",
+               "stream", "talk", "show", "tell", "there", "their", "from", "have", "has", "had", "for",
+               "when", "where", "which", "how", "why", "are", "you", "your", "can", "could", "would"}
+FUNNY = re.compile(r"\b(funn|joke|jok|laugh|hilarious|humou?r|witty|lol)", re.I)
+JOKE_MARKERS = re.compile(r"kidding|that's a joke|it turns out|funny|haha|evil|laugh", re.I)
 
 INDEX = Index()
 
@@ -162,7 +177,7 @@ MAX_CTX_CHARS = 14000  # Superlinked's Qwen3.8-27B has an 8k-token window; ~4k t
 
 def fit(lines: list[str], max_chars: int = MAX_CTX_CHARS, keep: str = "end") -> list[str]:
     """Shorten long lines and drop lines until the total fits the model's context window."""
-    lines = [l if len(l) <= 300 else l[:297] + "..." for l in lines]
+    lines = [l if len(l) <= 1100 else l[:1097] + "..." for l in lines]
     while lines and sum(len(l) + 1 for l in lines) > max_chars:
         lines.pop(0 if keep == "end" else -1)
     return lines
@@ -429,6 +444,8 @@ async def _answer(q: str, original: str | None = None) -> dict:
         window = [e for e in by_time if event_epoch(e) >= cutoff] or by_time[-8:]
         text = await llm_answer(q, [fmt(e) for e in window[-60:]])
         used = "recent window"
+    elif FUNNY.search(q):
+        used = "joke scan"
     elif WHO.search(q):
         used = "speaker lines"  # lines carry speaker names from the timeline; Cognee's notes may not yet
     elif MODE == "cognee" and synced_count() > 0 and not lagging:
@@ -449,6 +466,9 @@ async def _answer(q: str, original: str | None = None) -> dict:
         lines = [fmt(e) for e in sorted(ctx, key=lambda e: (e["date"], e["t"]))]
         if WHO.search(q) and speakers.segments():
             lines = speakers.summary().splitlines() + [""] + lines
+        if FUNNY.search(q):  # "funniest thing said": give the model the lines that sound like jokes
+            jokes = [e for e in by_time if e["kind"] == "speech" and JOKE_MARKERS.search(e["text"])]
+            lines = [fmt(e) for e in jokes] + [""] + lines
         text = await llm_answer(q, lines) if lines else "Nothing recorded yet."
 
     # Sources: only the lines whose timestamps the answer actually cites
