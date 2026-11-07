@@ -42,7 +42,12 @@
                 white-space: pre-wrap; word-break: break-all; color: var(--fg); }
   .agent .copy button { flex: none; font: inherit; font-size: 13px; border: 0; border-radius: 8px; padding: 7px 10px;
                         background: var(--me); color: var(--me-fg); cursor: pointer; }
-  .agent .small { font-size: 13px; margin-top: 8px; }
+  .agent .small { font-size: 13px; margin-top: 8px; color: var(--muted); }
+  .agent .btns { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 8px; }
+  .agent .big { font: inherit; font-size: 14px; font-weight: 600; text-decoration: none; border: 0; cursor: pointer;
+                border-radius: 10px; padding: 9px 12px; background: var(--me); color: var(--me-fg); }
+  .agent .big.alt { background: var(--them); color: var(--fg); border: 1px solid var(--line); }
+  .agent details code { margin-bottom: 6px; }
   #chat { flex: 1; overflow-y: auto; padding: 16px 16px 8px; }
   .cwrap { max-width: 680px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; }
   .msg { max-width: 85%; padding: 10px 14px; border-radius: 18px; white-space: pre-wrap; word-wrap: break-word; }
@@ -100,14 +105,23 @@
     <button type="button" id="agentBtn" class="agent-btn" aria-expanded="false">Connect your agent</button>
   </div>
   <div id="agent" class="agent" hidden>
-    <p>Give your own agent (Claude Code, Cursor, any MCP client) this room's memory: every talk, slide
-       and speaker, searchable while you build. Same Wi-Fi as this laptop.</p>
-    <label>Claude Code</label>
-    <div class="copy"><code id="cmdClaude">…</code><button type="button" data-copy="cmdClaude">Copy</button></div>
-    <label>Cursor / other MCP clients (JSON)</label>
-    <div class="copy"><code id="cmdJson">…</code><button type="button" data-copy="cmdJson">Copy</button></div>
-    <p class="small">Tools: <b>ask</b>, <b>search</b>, <b>recent</b>, <b>transcript</b>, <b>speakers_timeline</b>,
-       <b>moment</b>. The room key keeps it to people in the room.</p>
+    <p><b>Use your own AI.</b> The room remembers every talk, slide and speaker; your agent does the
+       thinking. One click, same Wi-Fi as this laptop.</p>
+    <div class="btns">
+      <a class="big" id="lnCursor" href="#">Add to Cursor</a>
+      <a class="big" id="lnVscode" href="#">Add to VS Code</a>
+      <button type="button" class="big" data-copy="cmdClaude">Copy for Claude Code</button>
+      <button type="button" class="big" data-copy="mcpUrl">Copy MCP link (any agent)</button>
+    </div>
+    <label>No MCP? (ChatGPT, Grok, Muse, …)</label>
+    <div class="btns"><a class="big alt" id="lnContext" href="#" download="ask-the-room-context.md">Download room context (.md)</a></div>
+    <p class="small">Drop the file into any chat. It has the speaker timeline and every timestamped line.</p>
+    <details class="small"><summary>Details</summary>
+      <label>Claude Code</label><code id="cmdClaude">…</code>
+      <label>MCP link</label><code id="mcpUrl">…</code>
+      <p>Tools: <b>search</b>, <b>transcript</b>, <b>recent</b>, <b>speakers_timeline</b>, <b>frame</b> (the video
+         frame as an image), <b>moment</b> (frame + clip links). The key in the link keeps it to the room.</p>
+    </details>
   </div>
 </header>
 
@@ -165,22 +179,33 @@ $("agentBtn").addEventListener("click", async () => {
   const open = panel.hidden;
   panel.hidden = !open;
   btn.setAttribute("aria-expanded", String(open));
-  if (open && $("cmdClaude").textContent === "…") {
+  if (open && $("mcpUrl").textContent === "…") {
     try {
       const c = await (await fetch("api/connect")).json();
       $("cmdClaude").textContent = c.claude_code;
-      $("cmdJson").textContent = JSON.stringify(c.json, null, 2);
+      $("mcpUrl").textContent = c.url;
+      $("lnCursor").href = c.cursor;
+      $("lnVscode").href = c.vscode;
+      $("lnContext").href = c.context;
     } catch { $("cmdClaude").textContent = "Couldn't load connection details"; }
   }
 });
 document.addEventListener("click", async (e) => {
   const b = e.target.closest("[data-copy]");
   if (!b) return;
+  b.dataset.label = b.dataset.label || b.textContent;
   const text = $(b.dataset.copy).textContent;
-  try { await navigator.clipboard.writeText(text); b.textContent = "Copied"; }
-  catch { const r = document.createRange(); r.selectNodeContents($(b.dataset.copy));
-          getSelection().removeAllRanges(); getSelection().addRange(r); b.textContent = "Selected"; }
-  setTimeout(() => (b.textContent = "Copy"), 1500);
+  let ok = false;
+  try { await navigator.clipboard.writeText(text); ok = true; } catch {}
+  if (!ok) {  // plain-http LAN pages can't use the async clipboard; the old way still works
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    try { ok = document.execCommand("copy"); } catch {}
+    ta.remove();
+  }
+  b.textContent = ok ? "Copied ✓" : "Copy failed: see Details";
+  setTimeout(() => (b.textContent = b.dataset.label), 1600);
 });
 
 async function ask(text) {

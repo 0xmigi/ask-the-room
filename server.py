@@ -12,7 +12,7 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel
 
 import memory  # loads .env and configures Cognee before importing it
@@ -67,6 +67,15 @@ app = FastAPI(title="Ask the Room", lifespan=lifespan)
 class Ask(BaseModel):
     q: str
     history: list[dict] = []  # earlier turns [{q, a}], so follow-ups like "show me" make sense
+
+
+@app.get("/context.md")
+def context_md(key: str = ""):
+    """The room's memory as one Markdown file, for any AI (needs the room key)."""
+    if key != room_mcp.room_key():
+        raise HTTPException(401, "room key required: /context.md?key=<ROOM_KEY>")
+    return PlainTextResponse(room_mcp.context_markdown(), media_type="text/markdown; charset=utf-8",
+                             headers={"Content-Disposition": 'attachment; filename="ask-the-room-context.md"'})
 
 
 @app.get("/api/connect")

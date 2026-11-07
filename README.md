@@ -37,29 +37,29 @@ X livestream ──yt-dlp──► HLS ──ffmpeg (one process)
 | `media.py` | Any moment can be shown on request: tap a timestamp in an answer for the frame and a 30 s clip, or ask "show me…". Cuts only the needed HLS segments, so it takes seconds, and remembers every stream link so earlier broadcasts keep working. | |
 | `server.py` + `static/index.html` | Phone page: question box, live status, and answers with clickable timestamps and source lines. | |
 
-## Plug your agent into the room
+## Use your own AI
 
-The memory is also an **MCP server**, so people building at the event can give their own agent
-(Claude Code, Cursor, any MCP client) instant context on every talk, slide and speaker. Open the
-chat page, tap **Connect your agent**, and paste the command, e.g.:
+The room remembers; **people's own AI does the thinking** (and pays for it). Open the chat page and
+tap **Connect your agent**:
 
-```bash
-claude mcp add --transport http ask-the-room http://<laptop-ip>:8000/mcp --header "Authorization: Bearer <ROOM_KEY>"
-```
+- **Add to Cursor** / **Add to VS Code**: one-click install links
+- **Copy for Claude Code**: `claude mcp add --transport http ask-the-room "http://<laptop-ip>:8000/mcp?key=<ROOM_KEY>"`
+- **Copy MCP link**: paste into any MCP client
+- **Download room context (.md)**: for AIs that can't connect (ChatGPT, Grok, Muse…). One file with
+  the speaker timeline and every timestamped line, ready to drop into any chat
 
-| Tool | What it returns |
+| MCP tool | What it returns (no LLM on our side; costs the room nothing per question) |
 |---|---|
-| `ask(question)` | An answer citing `[HH:MM]` times, the source lines, and frame/clip links for "show me" questions |
-| `search(query, limit)` | Timestamped speech and slide lines with speaker names, best matches first |
-| `recent(minutes)` | Everything from the last N minutes |
+| `search(query, limit)` | Timestamped speech and slide lines with speaker names, best matches first (local Superlinked SIE) |
 | `transcript(start, end)` | Raw lines between two times |
+| `recent(minutes)` | Everything from the last N minutes |
 | `speakers_timeline()` | Who presented when |
-| `moment(time)` | Links to the video frame and a 30 s clip |
+| `frame(time)` | The video frame as an image, for the agent's own vision |
+| `moment(time)` | Links to the frame and a 30 s clip |
 
 **Access:** one shared memory per room, gated by a room key (`ROOM_KEY` in `.env`, generated on
-first run and shown on the chat page). Being in the room, on the same network and seeing the page,
-is what gets you in. Cognee itself supports per-user, per-dataset permissions if you need
-separate rooms or read-only guests.
+first run) carried in the link. Being in the room, on the same Wi-Fi and seeing the page, is what
+gets you in. The room's only running cost is turning the stream into text; questions are free.
 
 ## Run it
 
