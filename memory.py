@@ -197,9 +197,8 @@ async def answer(q: str) -> dict:
         lines = [fmt(e) for e in sorted(ctx, key=lambda e: e["t"])]
         text = await llm_answer(q, lines) if lines else "Nothing recorded yet."
 
-    # Sources: lines whose timestamps the answer cites, else the best SIE matches
+    # Sources: only the lines whose timestamps the answer actually cites
     cited = set(re.findall(r"\[(\d{1,2}:\d{2})", text))
-    pool = INDEX.events if cited else hits[:3]
-    sources = [e for e in pool if e["t"][:5] in cited][:6] if cited else pool
+    sources = [e for e in INDEX.events if e["t"][:5] in cited][:6]
     return {"answer": text, "memory": used,
             "sources": [{"t": e["t"], "kind": e["kind"], "text": e["text"]} for e in sources]}
