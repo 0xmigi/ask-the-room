@@ -242,4 +242,4 @@ async def answer(q: str) -> dict:
     cited = set(re.findall(r"(?<![\d:])(\d{1,2}:\d{2})(?!:\d)", text))
     sources = [e for e in by_time if e["t"][:5] in cited][:6]
     return {"answer": text, "memory": used,
-            "sources": [{"t": e["t"], "kind": e["kind"], "text": e["text"]} for e in sources]}
+            "sources": [{"t": e["t"], "date": e["date"], "kind": e["kind"], "text": e["text"]} for e in sources]}

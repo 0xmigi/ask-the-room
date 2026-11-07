@@ -45,6 +45,19 @@
   .src { margin-top: 6px; display: flex; flex-direction: column; gap: 6px; }
   .src div { background: var(--src); border-radius: 8px; padding: 6px 8px; white-space: normal; }
   .src b { color: var(--fg); font-variant-numeric: tabular-nums; }
+  button.ts { font: inherit; font-size: 13px; color: var(--fg); border: 0; cursor: pointer; }
+  button.ts::after { content: " ▸"; font-size: 10px; opacity: .55; }
+  button.ts.on { background: var(--me); color: var(--me-fg); }
+  .media { margin-top: 10px; border-radius: 12px; overflow: hidden; background: #000; position: relative;
+           white-space: normal; }
+  .media img, .media video { display: block; width: 100%; height: auto; min-height: 120px; object-fit: contain; }
+  .media .bar { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+                padding: 8px 10px; background: var(--src); color: var(--muted); font-size: 13px; }
+  .media .bar b { color: var(--fg); font-variant-numeric: tabular-nums; }
+  .media .play { font: inherit; font-size: 13px; font-weight: 600; border: 0; border-radius: 999px;
+                 padding: 5px 12px; background: var(--me); color: var(--me-fg); cursor: pointer; }
+  .media .play:disabled { opacity: .6; cursor: progress; }
+  .media .note { padding: 18px 12px; color: #bbb; font-size: 13px; text-align: center; }
   .intro { text-align: center; color: var(--muted); font-size: 14px; margin: 8px auto 4px; max-width: 34ch; }
   .suggest { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 4px 0 8px; }
   .suggest button { font: inherit; font-size: 14px; border: 1px solid var(--line); background: var(--them);
@@ -129,7 +142,16 @@ async function ask(text) {
                                        body: JSON.stringify({ q: text }) });
     const d = await r.json();
     if (!r.ok) throw new Error(d.detail || r.statusText);
-    let html = esc(d.answer).replace(/\[(\d{1,2}:\d{2})\]/g, '<span class="ts">$1</span>');
+    // each [HH:MM] becomes a small chip; tapping it opens the frame (and an on-request clip)
+    const exact = {};
+    for (const s of d.sources || []) {
+      const k = s.t.slice(0, 5);
+      if (!exact[k] || s.kind === "slide") exact[k] = { t: s.t, date: s.date || "" };
+    }
+    let html = esc(d.answer).replace(/\[(\d{1,2}:\d{2})\]/g, (_, hm) => {
+      const x = exact[hm] || { t: hm + ":00", date: "" };
+      return `<button type="button" class="ts" data-t="${x.t}" data-date="${x.date}" title="Show this moment">${hm}</button>`;
+    });
     if (d.sources?.length) {
       html += `<details><summary>${d.sources.length} source${d.sources.length > 1 ? "s" : ""}</summary><div class="src">` +
         d.sources.map((s) => `<div><b>${esc(s.t.slice(0, 5))}</b> ${s.kind === "slide" ? "🖼 " : ""}${esc(s.text.slice(0, 220))}${s.text.length > 220 ? "…" : ""}</div>`).join("") +
@@ -152,7 +174,49 @@ function send() {
 $("f").addEventListener("submit", (e) => { e.preventDefault(); send(); });
 q.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });
 q.addEventListener("input", () => { q.style.height = ""; q.style.height = Math.min(q.scrollHeight, 120) + "px"; });
-log.addEventListener("click", (e) => { if (e.target.matches(".suggest button")) ask(e.target.textContent); });
+log.addEventListener("click", (e) => {
+  if (e.target.matches(".suggest button")) return ask(e.target.textContent);
+  const chip = e.target.closest("button.ts");
+  if (chip) return toggleMoment(chip);
+  const play = e.target.closest(".media .play");
+  if (play) return playClip(play);
+});
+
+// ---- on-request media: a frame first, a 30 s clip only if asked ----
+function toggleMoment(chip) {
+  const msg = chip.closest(".msg");
+  const open = msg.querySelector(".media");
+  const wasThis = chip.classList.contains("on");
+  msg.querySelectorAll("button.ts.on").forEach((b) => b.classList.remove("on"));
+  open?.remove();
+  if (wasThis) return;
+  chip.classList.add("on");
+  const qs = `t=${encodeURIComponent(chip.dataset.t)}${chip.dataset.date ? "&date=" + chip.dataset.date : ""}`;
+  const card = document.createElement("div");
+  card.className = "media";
+  card.dataset.qs = qs;
+  card.innerHTML = `<div class="note">Loading the moment…</div>
+    <div class="bar"><span><b>${esc(chip.dataset.t.slice(0, 5))}</b> on stream</span>
+    <button type="button" class="play">▶ Play 30s</button></div>`;
+  const img = new Image();
+  img.alt = "Stream at " + chip.dataset.t.slice(0, 5);
+  img.onload = () => card.querySelector(".note")?.replaceWith(img);
+  img.onerror = () => { const n = card.querySelector(".note"); if (n) n.textContent = "No picture for this moment"; };
+  img.src = "api/frame?" + qs;
+  msg.appendChild(card);
+  scrollDown();
+}
+
+async function playClip(btn) {
+  const card = btn.closest(".media");
+  btn.disabled = true; btn.textContent = "Cutting clip…";
+  const v = document.createElement("video");
+  v.controls = true; v.autoplay = true; v.playsInline = true;
+  v.oncanplay = () => { btn.remove(); };
+  v.onerror = () => { btn.disabled = false; btn.textContent = "Clip failed, retry"; v.remove(); };
+  v.src = "api/clip?" + card.dataset.qs;
+  (card.querySelector("img, .note") || card.firstChild).replaceWith(v);
+}
 </script>
 </body>
 </html>

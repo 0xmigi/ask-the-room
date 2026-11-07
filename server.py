@@ -5,6 +5,7 @@
 import asyncio
 import json
 import os
+import re
 import time
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 import memory  # loads .env and configures Cognee before importing it
+import media
 
 ROOT = Path(__file__).parent
 COGNIFY_EVERY = int(os.getenv("COGNIFY_EVERY", "180"))
@@ -39,6 +41,13 @@ async def start_sync_loop():
 
     asyncio.create_task(loop())
 
+    async def warm_media():
+        while True:
+            await asyncio.to_thread(media.warm)
+            await asyncio.sleep(15)
+
+    asyncio.create_task(warm_media())
+
 
 @app.get("/")
 def index():
@@ -60,6 +69,33 @@ def status():
         "memory": memory.MODE,
         "synced": memory.synced_count(),
     }
+
+
+TIME_RE = r"^\d{2}:\d{2}(:\d{2})?$"
+
+
+async def _media(fn, t: str, date: str | None, mime: str):
+    if not re.match(TIME_RE, t) or (date and not re.match(r"^\d{4}-\d{2}-\d{2}$", date)):
+        raise HTTPException(400, "t must be HH:MM[:SS], date YYYY-MM-DD")
+    try:
+        path = await fn(t if t.count(":") == 2 else t + ":00", date)
+    except LookupError as e:
+        raise HTTPException(404, str(e))
+    except Exception as e:
+        raise HTTPException(502, f"{type(e).__name__}: {e}")
+    return FileResponse(path, media_type=mime, headers={"Cache-Control": "max-age=86400"})
+
+
+@app.get("/api/frame")
+async def frame(t: str, date: str | None = None):
+    """The video frame at a moment of the stream (cut on request, then cached)."""
+    return await _media(media.frame, t, date, "image/jpeg")
+
+
+@app.get("/api/clip")
+async def clip(t: str, date: str | None = None):
+    """A 30 s clip starting at a moment of the stream (cut on request, then cached)."""
+    return await _media(media.clip, t, date, "video/mp4")
 
 
 @app.post("/api/ask")

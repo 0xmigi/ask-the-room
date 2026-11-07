@@ -17,7 +17,8 @@ record_once() {
   if [ -f "$SRC" ]; then
     input="$SRC"; re_flag=(-re)
   else
-    input="$(yt-dlp -g "$SRC" 2>/dev/null | tail -1)"
+    # 480p is plenty for audio + reading slides, and a quarter of 1080p's bandwidth on busy Wi-Fi
+    input="$(yt-dlp -g -f "live-1200/best[height<=480]/worst" "$SRC" 2>/dev/null | tail -1)"
     [ -z "$input" ] && { echo "[record] yt-dlp gave no URL (stream offline?)"; return 1; }
   fi
   echo "[record] $(date +%H:%M:%S) recording from ${input:0:80}..."
