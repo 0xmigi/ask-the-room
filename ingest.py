@@ -104,7 +104,21 @@ def collapse_repeats(text: str) -> str:
     return text.strip()
 
 
+def repair_wav(path: Path):
+    """If ffmpeg was stopped mid-chunk, the WAV header still says 0 bytes. Patch the sizes in place."""
+    b = bytearray(path.read_bytes())
+    i = b.find(b"data", 12)
+    if b[:4] != b"RIFF" or i < 0 or len(b) < i + 8:
+        return
+    data_len = len(b) - (i + 8)
+    if int.from_bytes(b[i + 4:i + 8], "little") != data_len:
+        b[4:8] = (len(b) - 8).to_bytes(4, "little")
+        b[i + 4:i + 8] = data_len.to_bytes(4, "little")
+        path.write_bytes(b)
+
+
 async def transcribe(client: httpx.AsyncClient, wav: Path) -> str:
+    repair_wav(wav)
     return collapse_repeats(await providers.transcribe(client, wav))
 
 
@@ -130,6 +144,9 @@ async def main():
 
             for p in todo:
                 t = stamp(p)
+                if p.stat().st_size < 1024:  # empty file left by a stopped ffmpeg
+                    done.add(p.name)
+                    continue
                 try:
                     if p.suffix == ".wav":
                         text = await transcribe(client, p)
@@ -148,7 +165,10 @@ async def main():
                             print(f"[ingest] {t} slide: {text[:90]}")
                     done.add(p.name)
                 except httpx.HTTPStatusError as e:
-                    print(f"[ingest] {p.name}: HTTP {e.response.status_code} {e.response.text[:200]}")
+                    code = e.response.status_code
+                    print(f"[ingest] {p.name}: HTTP {code} {e.response.text[:200]}")
+                    if 400 <= code < 500 and code not in (401, 403, 408, 429):
+                        done.add(p.name)  # bad file: skip it rather than retry forever
                 except Exception as e:  # network blips: retry next loop
                     print(f"[ingest] {p.name}: {e!r}")
                 state["done"] = sorted(done)
