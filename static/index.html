@@ -155,7 +155,7 @@ async function ask(text) {
     });
     if (d.sources?.length) {
       html += `<details><summary>${d.sources.length} source${d.sources.length > 1 ? "s" : ""}</summary><div class="src">` +
-        d.sources.map((s) => `<div><b>${esc(s.t.slice(0, 5))}</b> ${s.kind === "slide" ? "🖼 " : ""}${esc(s.text.slice(0, 220))}${s.text.length > 220 ? "…" : ""}</div>`).join("") +
+        d.sources.map((s) => `<div><b>${esc(s.t.slice(0, 5))}</b> ${s.kind === "slide" ? "🖼 " : (s.speaker ? "<i>" + esc(s.speaker) + ":</i> " : "")}${esc(s.text.slice(0, 220))}${s.text.length > 220 ? "…" : ""}</div>`).join("") +
         "</div></details>";
     }
     typing.className = "msg them";

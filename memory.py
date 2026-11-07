@@ -17,6 +17,7 @@ import numpy as np
 from dotenv import load_dotenv
 
 import providers
+import speakers
 
 ROOT = Path(__file__).parent
 load_dotenv(ROOT / ".env")
@@ -98,7 +99,7 @@ def fmt(e: dict) -> str:
     hhmm = e["t"][:5]
     if e["kind"] == "slide":
         return f"[{hhmm}] On screen: {e['text']}"
-    who = e.get("speaker") or "Speaker"
+    who = speakers.speaker_at(e["date"], e["t"]) or e.get("speaker") or "Speaker"
     return f"[{hhmm}] {who} said: {e['text']}"
 
 
@@ -134,6 +135,9 @@ class Index:
 
     async def refresh(self):
         async with self.lock:
+            if speakers.version() != getattr(self, "speakers_v", None):
+                self.speakers_v = speakers.version()
+                self.events, self.vecs = [], np.zeros((0, int(EMBED_DIMS)), dtype=np.float32)
             events = read_events()
             new = events[len(self.events):]
             if new:
@@ -183,6 +187,16 @@ async def sync() -> int:
     events = read_events()
     st = _state()
     total = 0
+    v = speakers.version()
+    if MODE == "cognee" and v and st.get("speakers_v") != v and speakers.segments():
+        try:
+            await cognee.add(speakers.summary(), dataset_name=DATASET)
+            await cognee.cognify(datasets=[DATASET])
+            st["speakers_v"] = v
+            STATE.write_text(json.dumps(st))
+            print("[memory] speaker timeline added to Cognee")
+        except Exception as e:
+            print(f"[memory] speaker timeline cognify failed: {str(e)[:200]}")
     while st["synced"] < len(events):
         batch = events[st["synced"]:st["synced"] + SYNC_BATCH]
         if MODE == "cognee":
@@ -218,6 +232,8 @@ def _flatten(results) -> str:
 
 VISUAL = re.compile(r"\b(show( me)?|footage|clip|video|watch|picture|photo|image|screenshot|frame)\b|"
                     r"\blooks? like\b|\bwhat did .{1,40} look\b|\bwhat (is|was) .{1,30} wearing\b", re.I)
+WHO = re.compile(r"^\s*who\b|\bwho (is|was|were|talked|spoke|said|presented|gave|mentioned)\b|\bwhich (speaker|company|presenter)\b", re.I)
+TALKY = re.compile(r"\b(talk|presentation|presenter|speaker|keynote|demo|pitch)\b", re.I)
 WANTS_CLIP = re.compile(r"\b(footage|clip|video|watch|play)\b", re.I)
 
 PICK_PROMPT = (
@@ -231,12 +247,20 @@ PICK_PROMPT = (
 
 STOP = {"what", "does", "look", "like", "looks", "show", "footage", "clip", "video", "picture", "photo",
         "image", "screenshot", "frame", "from", "with", "that", "this", "when", "where", "they", "them",
-        "their", "talk", "about", "give", "please", "watch", "see", "stream", "slide", "slides", "the"}
+        "their", "talk", "about", "give", "please", "watch", "see", "stream", "slide", "slides", "the",
+        "presenter", "presenters", "speaker", "speakers", "presentation", "keynote", "person", "guy",
+        "wearing", "doing", "said", "saying", "during", "demo", "pitch"}
 
 
-def _look_prompt(q: str, t: str, named: bool = False) -> str:
-    hint = (" The transcript says the person asked about was presenting around this time, so they are "
-            "most likely the presenter visible here; describe that presenter.") if named else ""
+def _look_prompt(q: str, t: str, named: bool = False, who: str | None = None) -> str:
+    if who and who.lower() != "host":
+        hint = (f" According to the speaker timeline, {who} is presenting at this moment, so the presenter "
+                f"visible here is {who}; describe them.")
+    elif named:
+        hint = (" The transcript says the person asked about was presenting around this time, so they are "
+                "most likely the presenter visible here; describe that presenter.")
+    else:
+        hint = ""
     return (f"A viewer of a hackathon livestream asked: \"{q}\". This is the stream at {t[:5]}.{hint} "
             "Answer from what is visible, in 1-3 sentences. The presenter is often in the small "
             "camera window in a corner. Describe appearance and what is on screen. If the frame "
@@ -268,18 +292,24 @@ async def visual_answer(q: str, by_time: list[dict]) -> dict:
         size += len(line) + 1
     lines = [fmt(e)[:300] for e in sorted(chosen, key=lambda e: (e["date"], e["t"]))]
     async with httpx.AsyncClient() as c:
-        raw = await providers.chat(c, [{"role": "system", "content": PICK_PROMPT},
+        raw = "" if speakers.find(words, TALKY.search(q) is not None) else await providers.chat(c, [{"role": "system", "content": PICK_PROMPT},
                                        {"role": "user", "content": "\n".join(lines) + f"\n\nUser asks: {q}"}],
                                    max_tokens=60)
     m = re.search(r"(\d{1,2}:\d{2}(?::\d{2})?)", raw or "")
     t = m.group(1) if m else hits[0]["t"]
+    seg = speakers.find(words, TALKY.search(q) is not None)
+    if seg:  # the speaker timeline knows exactly when this person was on stage
+        a = dt.datetime.fromisoformat(f"{seg['date']}T{seg['start']}")
+        b = dt.datetime.fromisoformat(f"{seg['date']}T{seg['end']}")
+        t = (a + (b - a) * 0.4).strftime("%H:%M:%S")
     t = t if t.count(":") == 2 else t + ":00"
     t = f"{int(t[:t.index(':')]):02d}{t[t.index(':'):]}"
     date = (hits[0] if hits else by_time[-1])["date"]
     try:
         frame = await media.frame(t, date)
         async with httpx.AsyncClient() as c:
-            seen = await providers.describe_image(c, frame, _look_prompt(q, t, bool(named)))
+            who = speakers.speaker_at(date, t)
+            seen = await providers.describe_image(c, frame, _look_prompt(q, t, bool(named), who))
     except Exception as e:
         print(f"[memory] visual answer: no frame for {t}: {e!r}")
         seen = "I couldn't get the video for that moment."
@@ -306,6 +336,8 @@ async def answer(q: str) -> dict:
         window = [e for e in by_time if event_epoch(e) >= cutoff] or by_time[-8:]
         text = await llm_answer(q, [fmt(e) for e in window[-60:]])
         used = "recent window"
+    elif WHO.search(q):
+        used = "speaker lines"  # lines carry speaker names from the timeline; Cognee's notes may not yet
     elif MODE == "cognee" and synced_count() > 0 and not lagging:
         try:
             res = await cognee.search(query_text=q, query_type=SearchType.HYBRID_COMPLETION,
@@ -322,10 +354,13 @@ async def answer(q: str) -> dict:
         hits = await INDEX.top(q, k=14)
         ctx = {id(e): e for e in hits + by_time[-6:]}.values()
         lines = [fmt(e) for e in sorted(ctx, key=lambda e: (e["date"], e["t"]))]
+        if WHO.search(q) and speakers.segments():
+            lines = speakers.summary().splitlines() + [""] + lines
         text = await llm_answer(q, lines) if lines else "Nothing recorded yet."
 
     # Sources: only the lines whose timestamps the answer actually cites
     cited = set(re.findall(r"(?<![\d:])(\d{1,2}:\d{2})(?!:\d)", text))
     sources = [e for e in by_time if e["t"][:5] in cited][:6]
     return {"answer": text, "memory": used,
-            "sources": [{"t": e["t"], "date": e["date"], "kind": e["kind"], "text": e["text"]} for e in sources]}
+            "sources": [{"t": e["t"], "date": e["date"], "kind": e["kind"], "text": e["text"],
+                         "speaker": speakers.speaker_at(e["date"], e["t"])} for e in sources]}

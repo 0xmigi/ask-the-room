@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 import memory  # loads .env and configures Cognee before importing it
 import media
+import speakers
 
 ROOT = Path(__file__).parent
 COGNIFY_EVERY = int(os.getenv("COGNIFY_EVERY", "180"))
@@ -31,6 +32,12 @@ class Ask(BaseModel):
 async def start_sync_loop():
     async def loop():
         while True:
+            try:
+                changed = await speakers.update()
+                if changed:
+                    print(f"[speakers] timeline updated ({changed} segments)")
+            except Exception as e:
+                print(f"[speakers] update failed: {e!r}")
             try:
                 n = await memory.sync()
                 if n:
