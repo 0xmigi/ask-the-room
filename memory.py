@@ -237,19 +237,25 @@ TALKY = re.compile(r"\b(talk|presentation|presenter|speaker|keynote|demo|pitch)\
 WANTS_CLIP = re.compile(r"\b(footage|clip|video|watch|play)\b", re.I)
 
 PICK_PROMPT = (
-    "The user wants to SEE something from a livestream. Below are timestamped lines from it. "
-    "Pick the single moment whose video frame would best show what they ask for. If they name a "
-    "person, pick a time while that person was presenting or speaking (people are usually thanked "
-    "right AFTER their talk, so pick a few minutes earlier, during their slides). If they ask for a "
-    "slide or topic, pick when it was on screen. Reply with only JSON like {\"t\": \"HH:MM:SS\"}."
+    "The user wants to SEE something from a hackathon livestream. You get the speaker timeline (who "
+    "presented when) and timestamped lines. Pick the single best moment. For people, use the "
+    "timeline: 'the first speaker' is the earliest presenter who is not the Host; 'the speaker' or "
+    "'the presenter' with no name means the presenter linked to a time or topic in the question, or "
+    "else the most recent presenter; if a time mentioned had no presenter (a break), choose the "
+    "closest presenter's talk. Pick a time in the middle of their talk. For slides or topics, pick "
+    "when it was on screen. Reply with only JSON like {\"t\": \"HH:MM:SS\", \"speaker\": \"Kaido\"} "
+    "(speaker = a name from the timeline, or null)."
 )
+PERSON = re.compile(r"\b(speaker|presenter|person|host|him|her|guy|woman|man|face|who)\b|"
+                    r"\blook(s|ed)? like\b|\bwearing\b", re.I)
 
 
 STOP = {"what", "does", "look", "like", "looks", "show", "footage", "clip", "video", "picture", "photo",
         "image", "screenshot", "frame", "from", "with", "that", "this", "when", "where", "they", "them",
         "their", "talk", "about", "give", "please", "watch", "see", "stream", "slide", "slides", "the",
         "presenter", "presenters", "speaker", "speakers", "presentation", "keynote", "person", "guy",
-        "wearing", "doing", "said", "saying", "during", "demo", "pitch"}
+        "wearing", "doing", "said", "saying", "during", "demo", "pitch", "first", "second",
+        "third", "next", "last", "previous", "earlier", "later", "again", "host"}
 
 
 def _look_prompt(q: str, t: str, named: bool = False, who: str | None = None) -> str:
@@ -267,7 +273,31 @@ def _look_prompt(q: str, t: str, named: bool = False, who: str | None = None) ->
             "doesn't show what was asked, say what it does show.")
 
 
-async def visual_answer(q: str, by_time: list[dict]) -> dict:
+def _seg_point(seg: dict, frac: float = 0.4) -> str:
+    a = dt.datetime.fromisoformat(f"{seg['date']}T{seg['start']}")
+    b = dt.datetime.fromisoformat(f"{seg['date']}T{seg['end']}")
+    return (a + (b - a) * frac).strftime("%H:%M:%S")
+
+
+def _presenter_at(date: str | None, t: str) -> dict | None:
+    for sg in speakers.segments():
+        if (date is None or sg.get("date") == date) and sg["start"] <= t <= sg["end"] \
+                and sg["speaker"].lower() != "host":
+            return sg
+    return None
+
+
+def _presenter_frame(seg: dict, by_time: list[dict]) -> str:
+    """A time inside this person's talk where a slide was on screen, near 40% of the way in."""
+    target = dt.datetime.fromisoformat(f"{seg['date']}T{_seg_point(seg)}").timestamp()
+    slides = [e for e in by_time if e["kind"] == "slide" and e["date"] == seg.get("date")
+              and seg["start"] <= e["t"] <= seg["end"]]
+    if not slides:
+        return _seg_point(seg)
+    return min(slides, key=lambda e: abs(event_epoch(e) - target))["t"]
+
+
+async def visual_answer(q: str, by_time: list[dict], original: str | None = None) -> dict:
     """'Show me X' / 'what does X look like': pick the moment, look at the frame, attach media."""
     import media  # local import: media is only needed for these questions
     hits = await INDEX.top(q, k=16)
@@ -291,24 +321,46 @@ async def visual_answer(q: str, by_time: list[dict]) -> dict:
         chosen.append(e)
         size += len(line) + 1
     lines = [fmt(e)[:300] for e in sorted(chosen, key=lambda e: (e["date"], e["t"]))]
-    async with httpx.AsyncClient() as c:
-        raw = "" if (speakers.find(words, TALKY.search(q) is not None)
-                     or re.search(r"\b\d{1,2}:\d{2}\b", q)) else await providers.chat(c, [{"role": "system", "content": PICK_PROMPT},
-                                       {"role": "user", "content": "\n".join(lines) + f"\n\nUser asks: {q}"}],
-                                   max_tokens=60)
-    m = re.search(r"(\d{1,2}:\d{2}(?::\d{2})?)", raw or "")
-    t = m.group(1) if m else hits[0]["t"]
     seg = speakers.find(words, TALKY.search(q) is not None)
-    explicit = re.search(r"\b(\d{1,2}):(\d{2})(?::(\d{2}))?\b", q)
-    if explicit:  # "show me ... at 11:05": the user (or the previous answer) named the moment
-        h, mnt, sec = explicit.group(1), explicit.group(2), explicit.group(3) or "00"
-        t = f"{int(h):02d}:{mnt}:{sec}"
-    elif seg:  # the speaker timeline knows exactly when this person was on stage
-        a = dt.datetime.fromisoformat(f"{seg['date']}T{seg['start']}")
-        b = dt.datetime.fromisoformat(f"{seg['date']}T{seg['end']}")
-        t = (a + (b - a) * 0.4).strftime("%H:%M:%S")
+    explicit = re.search(r"\b(\d{1,2}):(\d{2})(?::(\d{2}))?\b", original or q)
+    t = None
+    if explicit:  # the user typed a time themselves: that wins
+        t = f"{int(explicit.group(1)):02d}:{explicit.group(2)}:{explicit.group(3) or '00'}"
+    elif seg:     # a name matched the speaker timeline
+        hinted = re.search(r"\b(\d{1,2}):(\d{2})\b", q)  # time carried over from the previous answer
+        ht = f"{int(hinted.group(1)):02d}:{hinted.group(2)}:00" if hinted else None
+        t = ht if ht and seg["start"] <= ht <= seg["end"] else _seg_point(seg)
+    else:         # let the model choose, with the timeline in view ("first speaker", "the speaker", ...)
+        timeline = speakers.summary() if speakers.segments() else "(no speaker timeline yet)"
+        async with httpx.AsyncClient() as c:
+            raw = await providers.chat(c, [{"role": "system", "content": PICK_PROMPT},
+                                           {"role": "user", "content": timeline + "\n\nLines:\n" + "\n".join(lines)
+                                                                      + f"\n\nUser asks: {q}"}], max_tokens=80)
+        m = re.search(r"(\d{1,2}:\d{2}(?::\d{2})?)", raw or "")
+        if m:
+            t = m.group(1)
+        sm = re.search(r'"speaker"\s*:\s*"([^"]+)"', raw or "")
+        if sm:
+            seg = speakers.find({sm.group(1).lower()}) or seg
+    if t is None:
+        t = hits[0]["t"] if hits else by_time[-1]["t"]
     t = t if t.count(":") == 2 else t + ":00"
     t = f"{int(t[:t.index(':')]):02d}{t[t.index(':'):]}"
+    # questions about a person: land on a frame from their talk that has slides up, which in this
+    # stream always includes the presenter's camera window (break-time frames are just the thermal cam)
+    note = ""
+    if PERSON.search(q) and not explicit:
+        day = by_time[0]["date"] if by_time else None
+        on_stage = seg or _presenter_at(day, t)
+        if not on_stage:  # a break: say so, and show the most recent presenter before then
+            before = [sg for sg in speakers.segments() if sg["speaker"].lower() != "host"
+                      and sg.get("date") == day and sg["start"] <= t]
+            if before:
+                on_stage = before[-1]
+                note = (f"Nobody was presenting at {t[:5]} (it was a break), so here's the most recent "
+                        f"presenter, {on_stage['speaker']} ({on_stage['start'][:5]}-{on_stage['end'][:5]}). ")
+        if on_stage:
+            t = _presenter_frame(on_stage, by_time)
     date = (hits[0] if hits else by_time[-1])["date"]
     try:
         frame = await media.frame(t, date)
@@ -319,7 +371,7 @@ async def visual_answer(q: str, by_time: list[dict]) -> dict:
         print(f"[memory] visual answer: no frame for {t}: {e!r}")
         seen = "I couldn't get the video for that moment."
     near = [e for e in by_time if abs(event_epoch(e) - dt.datetime.fromisoformat(f"{date}T{t}").timestamp()) <= 90]
-    return {"answer": f"{seen} [{t[:5]}]", "memory": "vision",
+    return {"answer": f"{note}{seen} [{t[:5]}]", "memory": "vision",
             "media": {"t": t, "date": date, "play": bool(WANTS_CLIP.search(q))},
             "sources": [{"t": e["t"], "date": e["date"], "kind": e["kind"], "text": e["text"]} for e in near[:4]]}
 
@@ -354,18 +406,18 @@ async def standalone(q: str, history: list[dict]) -> str:
 async def answer(q: str, history: list[dict] | None = None) -> dict:
     original = q
     q = await standalone(q, history or [])
-    result = await _answer(q)
+    result = await _answer(q, original)
     if q != original:
         result["asked_as"] = q
     return result
 
 
-async def _answer(q: str) -> dict:
+async def _answer(q: str, original: str | None = None) -> dict:
     await INDEX.refresh()
     by_time = sorted(INDEX.events, key=lambda e: (e["date"], e["t"]))
     used, text = MODE, ""
     if VISUAL.search(q) and by_time:
-        return await visual_answer(q, by_time)
+        return await visual_answer(q, by_time, original)
 
     m = RECENT.search(q)
     lagging = len(INDEX.events) - synced_count() > 20
