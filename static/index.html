@@ -122,7 +122,7 @@ function bubble(cls, html) {
 async function status() {
   try {
     const s = await (await fetch("api/status")).json();
-    const live = s.last_event_age_s !== null && s.last_event_age_s < 180;
+    const live = s.recording_age_s !== null && s.recording_age_s < 90;
     $("dot").className = "dot" + (live ? " live" : "");
     const mins = s.speech;  // one line per ~60 s chunk with speech
     $("status").textContent = (live ? "Listening live" : "Not live") +

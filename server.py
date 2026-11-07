@@ -68,7 +68,14 @@ def status():
         "last_event_age_s": age,
         "memory": memory.MODE,
         "synced": memory.synced_count(),
+        # live = the recorder wrote audio in the last 90 s (quiet stretches still count)
+        "recording_age_s": _recording_age(),
     }
+
+
+def _recording_age():
+    wavs = list((ROOT / "audio").glob("*.wav"))
+    return time.time() - max(w.stat().st_mtime for w in wavs) if wavs else None
 
 
 TIME_RE = r"^\d{2}:\d{2}(:\d{2})?$"
