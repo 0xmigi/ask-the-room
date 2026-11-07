@@ -2,7 +2,7 @@
 # Starts everything: Superlinked SIE (embeddings), the server + phone page, the ingester, the recorder.
 # Ctrl+C stops all of it. Logs go to *.log in this folder.
 cd "$(dirname "$0")"
-[ -f .env ] || { echo "copy .env.example to .env and add your Darkbloom key"; exit 1; }
+[ -f .env ] || { echo "copy .env.example to .env and add your Superlinked key (SIE_API_KEY)"; exit 1; }
 set -a; . ./.env; set +a
 trap 'kill 0' EXIT
 

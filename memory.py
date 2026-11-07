@@ -1,7 +1,7 @@
 """The room's memory.
 
-- Cognee (graph + vector memory) is the main store. Its LLM is Darkbloom, its embeddings are
-  Superlinked SIE running on this machine.
+- Cognee (graph + vector memory) is the main store. Its LLM is the chat provider (Superlinked
+  Serverless by default), its embeddings are Superlinked SIE running on this machine.
 - A small SIE-only index over the same events picks the exact timestamped source lines shown
   under each answer, and answers by itself if Cognee errors (or MEMORY=simple).
 """
@@ -16,6 +16,8 @@ import httpx
 import numpy as np
 from dotenv import load_dotenv
 
+import providers
+
 ROOT = Path(__file__).parent
 load_dotenv(ROOT / ".env")
 DATA = ROOT / "data"
@@ -23,21 +25,18 @@ DATA.mkdir(exist_ok=True)
 EVENTS = DATA / "events.jsonl"
 STATE = DATA / "memory_state.json"
 
-KEY = os.getenv("DARKBLOOM_API_KEY", "")
-BASE = os.getenv("DARKBLOOM_BASE_URL", "https://api.darkbloom.dev/v1").rstrip("/")
-ANSWER_MODEL = os.getenv("ANSWER_MODEL", "gpt-oss-20b")
 SIE_URL = os.getenv("SIE_URL", "http://localhost:8080").rstrip("/")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "Snowflake/snowflake-arctic-embed-s")
 EMBED_DIMS = os.getenv("EMBED_DIMS", "384")
 DATASET = os.getenv("DATASET", "room")
 MODE = os.getenv("MEMORY", "cognee")
 
-# --- Point Cognee at Darkbloom (LLM) + Superlinked SIE (embeddings), store data in the repo ---
+# --- Point Cognee at the chat provider (LLM) + local Superlinked SIE (embeddings) ---
 for k, v in {
     "LLM_PROVIDER": "custom",
-    "LLM_MODEL": f"openai/{ANSWER_MODEL}",
-    "LLM_ENDPOINT": BASE,
-    "LLM_API_KEY": KEY or ".",
+    "LLM_MODEL": f"openai/{providers.CHAT_MODEL}",
+    "LLM_ENDPOINT": providers.BASE,
+    "LLM_API_KEY": providers.KEY or ".",
     "EMBEDDING_PROVIDER": "openai_compatible",
     "EMBEDDING_MODEL": EMBED_MODEL,
     "EMBEDDING_ENDPOINT": f"{SIE_URL}/v1",
@@ -139,19 +138,13 @@ class Index:
 INDEX = Index()
 
 
-# ---------- Darkbloom answer ----------
+# ---------- answer (fallback path) ----------
 async def llm_answer(q: str, lines: list[str]) -> str:
-    async with httpx.AsyncClient(timeout=90) as c:
-        r = await c.post(
-            f"{BASE}/chat/completions",
-            headers={"Authorization": f"Bearer {KEY}"},
-            json={"model": ANSWER_MODEL, "max_tokens": 600, "messages": [
-                {"role": "system", "content": ANSWER_PROMPT},
-                {"role": "user", "content": "Livestream lines:\n" + "\n".join(lines) + f"\n\nQuestion: {q}"},
-            ]},
-        )
-    r.raise_for_status()
-    return (r.json()["choices"][0]["message"].get("content") or "").strip()
+    async with httpx.AsyncClient() as c:
+        return await providers.chat(c, [
+            {"role": "system", "content": ANSWER_PROMPT},
+            {"role": "user", "content": "Livestream lines:\n" + "\n".join(lines) + f"\n\nQuestion: {q}"},
+        ])
 
 
 # ---------- public API used by server.py ----------

@@ -8,20 +8,20 @@ Built solo at **LOCALHOST: New York's Sovereign AI Hackathon**, Nov 7 2026.
 
 ## Why
 
-Everyone misses half the talks at an event. Note-takers like Granola give one person a private memory. Ask the Room gives the **whole room** one memory. It also runs on hardware you control: the memory (Cognee) and the embeddings (Superlinked SIE) run on the laptop, and nothing gets stored in someone else's cloud.
+Everyone misses half the talks at an event. Note-takers like Granola give one person a private memory. Ask the Room gives the **whole room** one memory. It also runs on hardware you control: the memory (Cognee) and the embeddings (Superlinked SIE) run on the laptop, and nothing gets stored in someone else's cloud. Only the raw audio and frames go out to be transcribed and read, and those calls are stateless.
 
 ## How it works
 
 ```
 X livestream ──yt-dlp──► HLS ──ffmpeg (one process)
-   ├─ audio: 60 s WAV chunks ──► Darkbloom whisper ──► "[13:42] Speaker said: …"
-   └─ video: 1 frame / 30 s  ──► Darkbloom vision  ──► "[13:42] On screen: …"   (overlay & empty frames dropped)
+   ├─ audio: 60 s WAV chunks ──► Superlinked whisper-large-v3-turbo ──► "[13:42] Speaker said: …"
+   └─ video: 1 frame / 30 s  ──► Superlinked Qwen3.8-27B vision    ──► "[13:42] On screen: …"   (overlay & empty frames dropped)
                                          │
                                   data/events.jsonl
                                          │
              ┌───────────────────────────┴──────────────────────────┐
      Cognee memory (graph + vectors)                     SIE index (source lines)
-     LLM = Darkbloom gpt-oss-20b                         Superlinked SIE, local
+     LLM = Superlinked Qwen3.8-27B                       Superlinked SIE, local
      embeddings = Superlinked SIE (local)                       │
              └───────────────────────────┬──────────────────────────┘
                                          ▼
@@ -31,17 +31,17 @@ X livestream ──yt-dlp──► HLS ──ffmpeg (one process)
 | Piece | What it does | Sponsor |
 |---|---|---|
 | `record.sh` | yt-dlp gets the live HLS URL; one ffmpeg process writes `audio/HHMMSS.wav` (60 s) and `frames/HHMMSS.jpg` (every 30 s). It restarts itself when the stream token expires. | |
-| `ingest.py` | Sends each new chunk to **Darkbloom** speech-to-text and each frame to Darkbloom vision. Writes timestamped lines to `data/events.jsonl`, `transcript.md` and `slides.md`. Speakers are labelled from `schedule.json`. | **Darkbloom** |
-| `memory.py` | Every 3 min: `cognee.add` + `cognee.cognify` the new lines into a knowledge graph. Answers use `cognee.search(HYBRID_COMPLETION)`. **Cognee** uses Darkbloom as its LLM and **Superlinked SIE** as its embedding engine (OpenAI-compatible `/v1/embeddings`, running locally on Apple Silicon). | **Cognee**, **Superlinked**, **Darkbloom** |
+| `ingest.py` + `providers.py` | Sends each new chunk to **Superlinked Serverless** speech-to-text (`whisper-large-v3-turbo`) and each frame to Qwen3.8-27B vision. Writes timestamped lines to `data/events.jsonl`, `transcript.md` and `slides.md`. Speakers are labelled from `schedule.json`. `PROVIDER=darkbloom` switches all model calls to Darkbloom instead. | **Superlinked** (or **Darkbloom**) |
+| `memory.py` | Every 3 min: `cognee.add` + `cognee.cognify` the new lines into a knowledge graph. Answers use `cognee.search(HYBRID_COMPLETION)`. **Cognee** uses Superlinked Qwen3.8-27B as its LLM and **Superlinked SIE** as its embedding engine (OpenAI-compatible `/v1/embeddings`, running locally on Apple Silicon). | **Cognee**, **Superlinked** |
 | `server.py` + `static/index.html` | Phone page: question box, live status, and answers with clickable timestamps and source lines. | |
 
 ## Run it
 
-Needs macOS or Linux, `ffmpeg`, `yt-dlp`, `uv`, and a Darkbloom key from [console.darkbloom.dev](https://console.darkbloom.dev).
+Needs macOS or Linux, `ffmpeg`, `yt-dlp`, `uv`, and a Superlinked key from [console.superlinked.com](https://console.superlinked.com) (free credits, no card). Darkbloom works too: set `PROVIDER=darkbloom` and `DARKBLOOM_API_KEY`.
 
 ```bash
 brew install ffmpeg yt-dlp uv
-cp .env.example .env          # paste DARKBLOOM_API_KEY, set STREAM_URL
+cp .env.example .env          # paste SIE_API_KEY, set STREAM_URL
 uv sync
 ./start.sh                    # starts SIE, server, ingester, recorder; prints the phone URL
 ```
@@ -55,13 +55,13 @@ uv run ingest.py
 ./record.sh                   # or ./record.sh some-talk.mp4 to test offline
 ```
 
-If Cognee misbehaves, set `MEMORY=simple` in `.env`. Answers then come straight from the Superlinked SIE index plus Darkbloom.
+If Cognee misbehaves, set `MEMORY=simple` in `.env`. Answers then come straight from the local SIE index plus the chat model.
 
 ## Privacy
 
 - Recordings, transcripts, the knowledge graph and the embeddings all stay in this folder on your machine (`audio/`, `frames/`, `data/`, `.cognee/`).
 - The SIE embedding server listens only on `127.0.0.1`.
-- Transcription, vision and answers go through Darkbloom, an OpenAI-compatible API, so any self-hosted endpoint can replace it by changing `DARKBLOOM_BASE_URL`.
+- Transcription, vision and answers go through Superlinked Serverless (or Darkbloom). SIE is the same engine that runs locally, so the whole pipeline can move onto your own GPU by pointing `SUPERLINKED_BASE_URL` at your own `sie-server`.
 
 ## What's next
 

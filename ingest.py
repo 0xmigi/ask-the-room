@@ -1,10 +1,10 @@
-"""Watches audio/ and frames/ (written by record.sh), sends them to Darkbloom,
+"""Watches audio/ and frames/ (written by record.sh), sends them to the model provider
+(Superlinked Serverless by default, or Darkbloom),
 and appends timestamped lines to data/events.jsonl, transcript.md and slides.md.
 
     uv run ingest.py
 """
 import asyncio
-import base64
 import datetime as dt
 import json
 import os
@@ -15,6 +15,8 @@ from pathlib import Path
 import httpx
 from dotenv import load_dotenv
 
+import providers
+
 ROOT = Path(__file__).parent
 load_dotenv(ROOT / ".env")
 
@@ -24,11 +26,6 @@ STATE = DATA / "ingest_state.json"
 for d in (AUDIO, FRAMES, DATA):
     d.mkdir(exist_ok=True)
 
-BASE = os.getenv("DARKBLOOM_BASE_URL", "https://api.darkbloom.dev/v1").rstrip("/")
-KEY = os.getenv("DARKBLOOM_API_KEY", "")
-TRANSCRIBE_MODEL = os.getenv("TRANSCRIBE_MODEL", "whisper-1")
-VISION_MODEL = os.getenv("VISION_MODEL", "qwen3.6-35b-a3b-vl-mtp-mxfp8")
-HEADERS = {"Authorization": f"Bearer {KEY}"}
 
 # Whisper likes to invent these on silence / music
 HALLUCINATIONS = re.compile(
@@ -97,50 +94,20 @@ def ready(path: Path, newest: Path | None) -> bool:
 
 
 async def transcribe(client: httpx.AsyncClient, wav: Path) -> str:
-    with wav.open("rb") as f:
-        r = await client.post(
-            f"{BASE}/audio/transcriptions",
-            headers=HEADERS,
-            files={"file": (wav.name, f, "audio/wav")},
-            data={"model": TRANSCRIBE_MODEL},
-            timeout=120,
-        )
-    r.raise_for_status()
-    return (r.json().get("text") or "").strip()
+    return await providers.transcribe(client, wav)
 
 
 async def describe(client: httpx.AsyncClient, jpg: Path) -> str:
-    b64 = base64.b64encode(jpg.read_bytes()).decode()
-    r = await client.post(
-        f"{BASE}/chat/completions",
-        headers=HEADERS,
-        json={
-            "model": VISION_MODEL,
-            "max_tokens": 300,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": VISION_PROMPT},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
-                    ],
-                }
-            ],
-        },
-        timeout=120,
-    )
-    r.raise_for_status()
-    text = (r.json()["choices"][0]["message"].get("content") or "").strip()
+    text = await providers.describe_image(client, jpg, VISION_PROMPT)
     return "" if text.upper().startswith("NONE") else text
 
 
 async def main():
-    if not KEY or "REPLACE_ME" in KEY:
-        raise SystemExit("Set DARKBLOOM_API_KEY in .env first")
+    providers.check_key()
     state = load_state()
     done = set(state["done"])
     last_slide = ""
-    print(f"[ingest] watching {AUDIO.name}/ and {FRAMES.name}/ ...")
+    print(f"[ingest] provider={providers.PROVIDER}; watching {AUDIO.name}/ and {FRAMES.name}/ ...")
     async with httpx.AsyncClient() as client:
         while True:
             schedule = load_schedule()
