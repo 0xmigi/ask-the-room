@@ -1,0 +1,13 @@
+[project]
+name = "ask-the-room"
+version = "0.1.0"
+description = "Shared, private, queryable memory of a live stream"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+  "cognee",
+  "fastapi",
+  "uvicorn",
+  "httpx",
+  "python-dotenv",
+  "numpy",
+]

@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ask the Room</title>
+<style>
+  :root {
+    --bg: #f6f4ef; --fg: #1b1a17; --muted: #6f6a60; --card: #fff; --line: #e3dfd5;
+    --accent: #d2421f; --chip: #f1e7df;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #141311; --fg: #f1eee7; --muted: #9a9488; --card: #1e1c19; --line: #2e2b26;
+            --accent: #ff6a3d; --chip: #2d221d; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 17px/1.45 -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 24px 16px 120px; }
+  h1 { font-size: 28px; letter-spacing: -0.02em; margin: 8px 0 2px; }
+  .status { color: var(--muted); font-size: 14px; display: flex; gap: 8px; align-items: center; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .dot.live { background: var(--accent); animation: pulse 1.6s infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  form { position: fixed; left: 0; right: 0; bottom: 0; padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+         background: var(--bg); border-top: 1px solid var(--line); }
+  .row { max-width: 640px; margin: 0 auto; display: flex; gap: 8px; }
+  input { flex: 1; min-width: 0; font: inherit; padding: 12px 14px; border-radius: 12px;
+          border: 1px solid var(--line); background: var(--card); color: var(--fg); }
+  button { font: inherit; font-weight: 600; padding: 0 18px; border: 0; border-radius: 12px;
+           background: var(--accent); color: #fff; }
+  button:disabled { opacity: .5; }
+  .suggest { display: flex; flex-wrap: wrap; gap: 8px; margin: 20px 0; }
+  .suggest button { background: var(--chip); color: var(--fg); font-weight: 500; padding: 8px 12px; font-size: 15px; }
+  .qa { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; margin: 14px 0; }
+  .q { font-weight: 600; margin-bottom: 8px; }
+  .a { white-space: pre-wrap; }
+  .a.thinking { color: var(--muted); }
+  .src { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+  .src div { font-size: 14px; color: var(--muted); border-left: 3px solid var(--accent); padding-left: 8px; }
+  .src b { color: var(--fg); font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Ask the Room</h1>
+  <div class="status"><span class="dot" id="dot"></span><span id="status">connecting…</span></div>
+  <div class="suggest" id="suggest">
+    <button type="button">What did dmarz say at kickoff?</button>
+    <button type="button">What was on the last slide?</button>
+    <button type="button">Summarize the last 10 minutes</button>
+  </div>
+  <div id="log"></div>
+</main>
+<form id="f">
+  <div class="row">
+    <input id="q" placeholder="Ask about anything said or shown…" autocomplete="off" enterkeyhint="send">
+    <button id="go">Ask</button>
+  </div>
+</form>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+async function status() {
+  try {
+    const s = await (await fetch("api/status")).json();
+    const live = s.last_event_age_s !== null && s.last_event_age_s < 180;
+    $("dot").className = "dot" + (live ? " live" : "");
+    $("status").textContent = `${live ? "Listening" : "Idle"} · ${s.speech} lines, ${s.slides} slides` +
+      (s.last_t ? ` · last at ${s.last_t.slice(0, 5)}` : "") + ` · memory: ${s.memory}`;
+  } catch { $("status").textContent = "offline"; }
+}
+status(); setInterval(status, 15000);
+
+async function ask(q) {
+  const card = document.createElement("div");
+  card.className = "qa";
+  card.innerHTML = `<div class="q">${esc(q)}</div><div class="a thinking">Thinking…</div>`;
+  $("log").prepend(card);
+  $("go").disabled = true;
+  try {
+    const r = await fetch("api/ask", { method: "POST", headers: { "Content-Type": "application/json" },
+                                       body: JSON.stringify({ q }) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    const a = card.querySelector(".a");
+    a.className = "a"; a.textContent = d.answer;
+    if (d.sources?.length) {
+      const src = document.createElement("div");
+      src.className = "src";
+      src.innerHTML = d.sources.map((s) =>
+        `<div><b>${esc(s.t.slice(0, 5))}</b> ${s.kind === "slide" ? "🖼 " : ""}${esc(s.text.slice(0, 160))}${s.text.length > 160 ? "…" : ""}</div>`).join("");
+      card.appendChild(src);
+    }
+  } catch (e) {
+    card.querySelector(".a").textContent = "Error: " + e.message;
+  } finally { $("go").disabled = false; }
+}
+
+$("f").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const q = $("q").value.trim();
+  if (q) { ask(q); $("q").value = ""; $("q").blur(); }
+});
+$("suggest").addEventListener("click", (e) => { if (e.target.tagName === "BUTTON") ask(e.target.textContent); });
+</script>
+</body>
+</html>
